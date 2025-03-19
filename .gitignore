@@ -1,0 +1,17 @@
+.venv
+*.csv
+*locauto.txt
+*.md
+*.log
+*.pkl
+save
+*.xlsx
+*_analysis.txt
+__pycache__
+*.txt
+test.py
+*.png
+crawls
+*.json
+.env
+.scrapy
