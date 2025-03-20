@@ -10,12 +10,104 @@ import datetime
 
 T = TypeVar('T')
 
+# Definizione dello schema di configurazione
+DEFAULT_CONFIG_SCHEMA = {
+    # Configurazione Crawler
+    "CRAWLER_MAX_URLS": {
+        "type": "int",
+        "default": 100,
+        "description": "Numero massimo di URL per dominio",
+        "aliases": ["max_urls_per_domain", "max_urls"]
+    },
+    "CRAWLER_HYBRID_MODE": {
+        "type": "bool",
+        "default": True,
+        "description": "Modalità ibrida (Selenium + HTTP)",
+        "aliases": ["hybrid_mode"]
+    },
+    "CRAWLER_REQUEST_DELAY": {
+        "type": "float",
+        "default": 0.25,
+        "description": "Ritardo tra le richieste in secondi",
+        "aliases": ["request_delay"]
+    },
+    "CRAWLER_PENDING_THRESHOLD": {
+        "type": "int",
+        "default": 30, 
+        "description": "Soglia per passare da Selenium a HTTP",
+        "aliases": ["selenium_threshold", "pending_threshold"]
+    },
+    "CRAWLER_MAX_WORKERS": {
+        "type": "int",
+        "default": 16,
+        "description": "Numero massimo di worker concorrenti",
+        "aliases": ["max_workers"]
+    },
+    
+    # Configurazione Axe
+    "AXE_MAX_TEMPLATES": {
+        "type": "int",
+        "default": 50,
+        "description": "Massimo numero di template da analizzare",
+        "aliases": ["max_templates_per_domain"]
+    },
+    "AXE_POOL_SIZE": {
+        "type": "int",
+        "default": 5,
+        "description": "Dimensione del pool di driver Selenium",
+        "aliases": ["pool_size"]
+    },
+    "AXE_SLEEP_TIME": {
+        "type": "float",
+        "default": 1.0,
+        "description": "Tempo di attesa tra le richieste Axe",
+        "aliases": ["sleep_time"]
+    },
+    "AXE_HEADLESS": {
+        "type": "bool",
+        "default": True,
+        "description": "Modalità headless per Selenium",
+        "aliases": ["headless"]
+    },
+    "AXE_RESUME": {
+        "type": "bool",
+        "default": True,
+        "description": "Riprendi l'analisi da dove interrotta",
+        "aliases": ["resume"]
+    },
+    
+    # Configurazione Pipeline
+    "START_STAGE": {
+        "type": "str",
+        "default": "crawler",
+        "description": "Stadio iniziale della pipeline",
+        "allowed_values": ["crawler", "axe", "analysis"]
+    },
+    "REPEAT_ANALYSIS": {
+        "type": "int",
+        "default": 1,
+        "description": "Numero di volte da ripetere l'analisi Axe",
+        "aliases": ["repeat_axe"]
+    },
+    
+    # Configurazione Generale
+    "BASE_URLS": {
+        "type": "list",
+        "default": [],
+        "description": "URL di base da analizzare"
+    },
+    "OUTPUT_DIR": {
+        "type": "path",
+        "default": "~/axeScraper/output",
+        "description": "Directory di base per l'output"
+    }
+}
+
 class ConfigurationManager:
     """
     Gestore centralizzato delle configurazioni che integra più fonti:
     - Argomenti da linea di comando (priorità massima)
     - Variabili d'ambiente
-    - File .env
     - File di configurazione (.json, .yaml, ecc.)
     - Valori predefiniti (priorità minima)
     """
@@ -23,7 +115,8 @@ class ConfigurationManager:
     def __init__(
         self,
         project_name: str = "axeScraper",
-        config_file: Optional[Union[str, Path]] = "config.json",
+        config_file: Optional[Union[str, Path]] = None,
+        config_schema: Optional[Dict[str, Dict[str, Any]]] = None,
         cli_args: Optional[Dict[str, Any]] = None
     ):
         """
@@ -32,11 +125,18 @@ class ConfigurationManager:
         Args:
             project_name: Nome del progetto
             config_file: Percorso del file di configurazione
+            config_schema: Schema di configurazione personalizzato
             cli_args: Argomenti da linea di comando
         """
         self.project_name = project_name
         self.config_file = self._find_config_file(config_file)
         self.cli_args = cli_args or {}
+        
+        # Inizializza schema di configurazione
+        self.config_schema = config_schema or DEFAULT_CONFIG_SCHEMA
+        
+        # Alias mapping
+        self.aliases = self._build_alias_mapping()
         
         # Configura il logger
         self.logger = logging.getLogger(f"{project_name}.config")
@@ -65,32 +165,13 @@ class ConfigurationManager:
         self.logger.info(f"ConfigurationManager inizializzato: {project_name}")
         self.logger.info(f"File configurazione: {self.config_file}")
     
-    def _find_env_file(self, env_file: Optional[Union[str, Path]]) -> Optional[Path]:
-        """
-        Trova il file .env se non specificato.
-        
-        Args:
-            env_file: Percorso specificato o None
-            
-        Returns:
-            Percorso del file .env o None
-        """
-        if env_file:
-            return Path(env_file)
-            
-        # Cerca nei percorsi standard
-        search_paths = [
-            Path.cwd() / '.env',
-            Path.cwd().parent / '.env',
-            Path.home() / 'axeScraper' / '.env',
-            Path('/etc/axeScraper/.env')
-        ]
-        
-        for path in search_paths:
-            if path.exists():
-                return path
-                
-        return None
+    def _build_alias_mapping(self) -> Dict[str, str]:
+        """Costruisce un mapping da alias a chiavi standard"""
+        aliases = {}
+        for key, config in self.config_schema.items():
+            for alias in config.get("aliases", []):
+                aliases[alias] = key
+        return aliases
     
     def _find_config_file(self, config_file: Optional[Union[str, Path]]) -> Optional[Path]:
         if config_file:
@@ -109,62 +190,49 @@ class ConfigurationManager:
         return None
 
     def reload_config(self) -> bool:
+        """Ricarica tutte le configurazioni."""
         # Svuota la cache
         self._config_cache = {}
         # Carica la configurazione da file
         self._load_file_config()
         self.logger.info("Configurazione ricaricata")
+        
+        # Log dei valori chiave
+        self._log_key_config_values()
+        
         return True
     
-    def _load_env_vars(self) -> Dict[str, str]:
-        """
-        Carica le variabili d'ambiente dal file .env e dall'ambiente,
-        dando priorità al file .env.
+    def _log_key_config_values(self) -> None:
+        """Logga i valori delle configurazioni chiave."""
+        self.logger.info("=== Valori di configurazione chiave ===")
         
-        Returns:
-            Dizionario delle variabili d'ambiente
-        """
-        # Inizializza con le variabili di sistema
-        system_env = {k: v for k, v in os.environ.items()}
+        # Crawler
+        max_urls = self.get_int("CRAWLER_MAX_URLS")
+        hybrid_mode = self.get_bool("CRAWLER_HYBRID_MODE")
+        threshold = self.get_int("CRAWLER_PENDING_THRESHOLD")
         
-        # Inizializza un dizionario vuoto per le variabili caricate
-        self._env_vars = {}
+        self.logger.info(f"CRAWLER_MAX_URLS = {max_urls}")
+        self.logger.info(f"CRAWLER_HYBRID_MODE = {hybrid_mode}")
+        self.logger.info(f"CRAWLER_PENDING_THRESHOLD = {threshold}")
         
-        # Carica dal file .env se esiste
-        if self.env_file and self.env_file.exists():
-            try:
-                with open(self.env_file, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        # Salta righe vuote e commenti
-                        if not line or line.startswith('#'):
-                            continue
-                            
-                        # Elabora le righe con formato KEY=VALUE
-                        if '=' in line:
-                            key, value = line.split('=', 1)
-                            key = key.strip()
-                            value = value.strip()
-                            
-                            # Rimuovi le virgolette se presenti
-                            if (value.startswith('"') and value.endswith('"')) or \
-                            (value.startswith("'") and value.endswith("'")):
-                                value = value[1:-1]
-                                
-                            # Salva la variabile, SOVRASCRIVENDO quelle di sistema
-                            self._env_vars[key] = value
-                                
-            except Exception as e:
-                self.logger.error(f"Errore caricando il file .env: {e}")
+        # Axe
+        templates = self.get_int("AXE_MAX_TEMPLATES")
+        pool_size = self.get_int("AXE_POOL_SIZE")
         
-        # Aggiungi le variabili di sistema che NON sono state sovrascritte dal file .env
-        for key, value in system_env.items():
-            if key not in self._env_vars:
-                self._env_vars[key] = value
+        self.logger.info(f"AXE_MAX_TEMPLATES = {templates}")
+        self.logger.info(f"AXE_POOL_SIZE = {pool_size}")
         
-        return self._env_vars
+        # Pipeline
+        stage = self.get("START_STAGE")
+        repeat = self.get_int("REPEAT_ANALYSIS")
+        
+        self.logger.info(f"START_STAGE = {stage}")
+        self.logger.info(f"REPEAT_ANALYSIS = {repeat}")
+        
+        self.logger.info("================================")
     
     def _load_file_config(self) -> Dict[str, Any]:
+        """Carica la configurazione da file."""
         self._file_config = {}
         if not self.config_file or not self.config_file.exists():
             return {}
@@ -190,6 +258,22 @@ class ConfigurationManager:
             self.logger.error(f"Errore caricando il file di configurazione {self.config_file}: {e}")
             return {}
     
+    def _normalize_key(self, key: str) -> str:
+        """Normalizza una chiave di configurazione usando gli alias."""
+        # Se la chiave è già standardizzata, restituiscila com'è
+        if key in self.config_schema:
+            return key
+        
+        # Controlla se è un alias noto
+        if key in self.aliases:
+            standardized = self.aliases[key]
+            if self.debug_mode:
+                self.logger.debug(f"Normalizzato alias '{key}' a '{standardized}'")
+            return standardized
+        
+        # Altrimenti restituisci la chiave originale
+        return key
+    
     def get(
         self, 
         key: str, 
@@ -203,50 +287,109 @@ class ConfigurationManager:
         Ordine di priorità:
         1. Argomenti da linea di comando
         2. File di configurazione
-        3. Valore predefinito
+        3. Valore predefinito dallo schema
+        4. Valore predefinito fornito
         """
-        if not use_cache and key in self._config_cache:
-            del self._config_cache[key]
-        if use_cache and key in self._config_cache:
-            return self._config_cache[key]
+        # Normalizza la chiave
+        std_key = self._normalize_key(key)
         
-        # 1. Argomenti da linea di comando
-        if key in self.cli_args:
+        # Gestisci la cache
+        cache_key = f"{std_key}_{key}"  # Usa entrambi per distinguere richieste esplicite
+        if not use_cache and cache_key in self._config_cache:
+            del self._config_cache[cache_key]
+        if use_cache and cache_key in self._config_cache:
+            return self._config_cache[cache_key]
+        
+        # Inizializza con il valore predefinito più appropriato
+        schema_default = None
+        if std_key in self.config_schema:
+            schema_default = self.config_schema[std_key].get('default')
+            
+        # Valore finale predefinito (schema o fornito)
+        final_default = default if default is not None else schema_default
+        
+        # 1. Argomenti da linea di comando (controlla sia la chiave standard che gli alias)
+        if std_key in self.cli_args:
+            value = self.cli_args[std_key]
+            source = "CLI args (std key)"
+        elif key in self.cli_args:
             value = self.cli_args[key]
-            source = "CLI args"
+            source = "CLI args (alias)"
         else:
-            # 2. File di configurazione
-            if '.' in key:
-                parts = key.split('.')
+            # 2. File di configurazione (controlla sia la chiave standard che gli alias)
+            file_value = None
+            
+            # Controllo nidificato (e.g., "crawler.max_urls")
+            if '.' in std_key:
+                parts = std_key.split('.')
                 config = self._file_config
                 for part in parts:
                     if not isinstance(config, dict) or part not in config:
                         config = None
                         break
                     config = config[part]
-                value = config
+                file_value = config
             else:
-                value = self._file_config.get(key)
-            source = "config file"
-            # 3. Valore predefinito
-            if value is None:
-                value = default
+                # Controllo diretto sulla chiave standard
+                if std_key in self._file_config:
+                    file_value = self._file_config[std_key]
+                # Controllo sulla chiave originale (potrebbe essere un alias)
+                elif key in self._file_config:
+                    file_value = self._file_config[key]
+            
+            if file_value is not None:
+                value = file_value
+                source = "config file"
+            else:
+                # 3. Valore predefinito
+                value = final_default
                 source = "default value"
         
+        # Applica eventuale trasformazione
         if transform and value is not None:
             try:
                 value = transform(value)
             except Exception as e:
                 self.logger.warning(f"Errore trasformando valore per {key}: {e}")
-                value = default
+                value = final_default
+        
+        # Applica validazione dallo schema
+        if std_key in self.config_schema:
+            schema = self.config_schema[std_key]
+            
+            # Validazione del tipo
+            expected_type = schema.get('type')
+            if expected_type == 'int' and not isinstance(value, int):
+                try:
+                    value = int(value)
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Tipo non valido per {std_key} (atteso int): {value}")
+                    value = schema.get('default')
+            elif expected_type == 'bool' and not isinstance(value, bool):
+                if isinstance(value, str):
+                    value = value.lower() in ('1', 'true', 'yes', 'y', 'on')
+                else:
+                    value = bool(value)
+            elif expected_type == 'float' and not isinstance(value, float):
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Tipo non valido per {std_key} (atteso float): {value}")
+                    value = schema.get('default')
+            
+            # Validazione del valore
+            allowed_values = schema.get('allowed_values')
+            if allowed_values and value not in allowed_values:
+                self.logger.warning(f"Valore non valido per {std_key}: {value}. Valori consentiti: {allowed_values}")
+                value = schema.get('default')
         
         if self.debug_mode:
-            self.logger.debug(f"Config get: {key} = {value} (from {source})")
+            self.logger.debug(f"Config get: {key} ({std_key}) = {value} (from {source})")
         
-        self._config_cache[key] = value
+        self._config_cache[cache_key] = value
         return value
 
-    def get_bool(self, key: str, default: bool = False) -> bool:
+    def get_bool(self, key: str, default: bool = None) -> bool:
         """
         Ottiene un valore booleano.
         
@@ -257,7 +400,15 @@ class ConfigurationManager:
         Returns:
             Valore booleano
         """
-        return self.get(key, default, lambda v: self._to_bool(v, default))
+        schema_default = None
+        std_key = self._normalize_key(key)
+        
+        if std_key in self.config_schema and self.config_schema[std_key]['type'] == 'bool':
+            schema_default = self.config_schema[std_key].get('default')
+            
+        final_default = default if default is not None else schema_default
+        
+        return self.get(key, final_default, lambda v: self._to_bool(v, final_default))
     
     def _to_bool(self, value: Any, default: bool) -> bool:
         """Converte un valore in booleano."""
@@ -271,9 +422,9 @@ class ConfigurationManager:
             if value in ('0', 'false', 'no', 'n', 'off'):
                 return False
                 
-        return default
+        return bool(value) if value is not None else default
     
-    def get_int(self, key: str, default: int = 0) -> int:
+    def get_int(self, key: str, default: int = None) -> int:
         """
         Ottiene un valore intero.
         
@@ -284,9 +435,20 @@ class ConfigurationManager:
         Returns:
             Valore intero
         """
-        return self.get(key, default, lambda v: int(v))
+        schema_default = None
+        std_key = self._normalize_key(key)
+        
+        if std_key in self.config_schema and self.config_schema[std_key]['type'] == 'int':
+            schema_default = self.config_schema[std_key].get('default')
+            
+        final_default = default if default is not None else schema_default
+        
+        try:
+            return int(self.get(key, final_default))
+        except (ValueError, TypeError):
+            return final_default
     
-    def get_float(self, key: str, default: float = 0.0) -> float:
+    def get_float(self, key: str, default: float = None) -> float:
         """
         Ottiene un valore float.
         
@@ -297,7 +459,18 @@ class ConfigurationManager:
         Returns:
             Valore float
         """
-        return self.get(key, default, lambda v: float(v))
+        schema_default = None
+        std_key = self._normalize_key(key)
+        
+        if std_key in self.config_schema and self.config_schema[std_key]['type'] == 'float':
+            schema_default = self.config_schema[std_key].get('default')
+            
+        final_default = default if default is not None else schema_default
+        
+        try:
+            return float(self.get(key, final_default))
+        except (ValueError, TypeError):
+            return final_default
     
     def get_list(
         self, 
@@ -316,10 +489,17 @@ class ConfigurationManager:
         Returns:
             Valore lista
         """
-        if default is None:
-            default = []
+        schema_default = None
+        std_key = self._normalize_key(key)
+        
+        if std_key in self.config_schema and self.config_schema[std_key]['type'] == 'list':
+            schema_default = self.config_schema[std_key].get('default')
             
-        return self.get(key, default, lambda v: self._to_list(v, separator, default))
+        final_default = default if default is not None else schema_default
+        if final_default is None:
+            final_default = []
+            
+        return self.get(key, final_default, lambda v: self._to_list(v, separator, final_default))
     
     def _to_list(self, value: Any, separator: str, default: List[str]) -> List[str]:
         """Converte un valore in lista."""
@@ -340,7 +520,26 @@ class ConfigurationManager:
         default: Optional[Union[str, Path]] = None,
         create: bool = False
     ) -> Path:
-        path = self.get(key, default, lambda v: Path(os.path.expandvars(str(v))).expanduser())
+        """
+        Ottiene un percorso, espandendo variabili e creando directory se necessario.
+        
+        Args:
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
+            create: Se creare la directory
+            
+        Returns:
+            Percorso
+        """
+        schema_default = None
+        std_key = self._normalize_key(key)
+        
+        if std_key in self.config_schema and self.config_schema[std_key]['type'] == 'path':
+            schema_default = self.config_schema[std_key].get('default')
+            
+        final_default = default if default is not None else schema_default
+        
+        path = self.get(key, final_default, lambda v: Path(os.path.expandvars(str(v))).expanduser())
         
         if create and path:
             try:
@@ -451,11 +650,11 @@ class ConfigurationManager:
         # Crawler configuration with flexible state file paths
         crawler_config = {
             "domains": clean_domain,
-            "max_urls": self.get_int("CRAWLER_MAX_URLS", 100),
+            "max_urls": self.get_int("CRAWLER_MAX_URLS"),
             "max_retries": self.get_int("CRAWLER_MAX_RETRIES", 10),
-            "request_delay": self.get_float("CRAWLER_REQUEST_DELAY", 0.25),
-            "hybrid_mode": self.get_bool("CRAWLER_HYBRID_MODE", True),
-            "pending_threshold": self.get_int("CRAWLER_PENDING_THRESHOLD", 250),
+            "request_delay": self.get_float("CRAWLER_REQUEST_DELAY"),
+            "hybrid_mode": self.get_bool("CRAWLER_HYBRID_MODE"),
+            "pending_threshold": self.get_int("CRAWLER_PENDING_THRESHOLD"),
             "max_workers": self.get_int("CRAWLER_MAX_WORKERS", min(self.cpu_count * 2, 16)),
             "output_dir": str(output_dirs["crawler"]),
             "state_file": str(output_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
@@ -471,11 +670,11 @@ class ConfigurationManager:
         # Configurazione di Axe analysis
         axe_config = {
             "domains": clean_domain,
-            "max_templates_per_domain": self.get_int("MAX_TEMPLATES", 50),
-            "pool_size": self.get_int("POOL_SIZE", 5),
-            "sleep_time": self.get_float("SLEEP_TIME", 1),
-            "headless": self.get_bool("HEADLESS", True),
-            "resume": self.get_bool("RESUME", True),
+            "max_templates_per_domain": self.get_int("AXE_MAX_TEMPLATES"),
+            "pool_size": self.get_int("AXE_POOL_SIZE"),
+            "sleep_time": self.get_float("AXE_SLEEP_TIME"),
+            "headless": self.get_bool("AXE_HEADLESS"),
+            "resume": self.get_bool("AXE_RESUME"),
             "excel_filename": str(output_dirs["axe"] / f"accessibility_report_{domain_slug}.xlsx"),
             "visited_file": str(output_dirs["axe"] / f"visited_urls_{domain_slug}.txt"),
             "output_folder": str(output_dirs["axe"]),
@@ -602,7 +801,6 @@ class ConfigurationManager:
         """
         config = {
             "cli_args": self.cli_args,
-            "env_vars": {k: v for k, v in self._env_vars.items() if k.startswith("AXE_")},
             "file_config": self._file_config,
             "computed": {}
         }
@@ -614,6 +812,10 @@ class ConfigurationManager:
         config["computed"]["logging"] = self.get_logging_config()
         config["computed"]["email"] = self.get_email_config()
         
+        # Aggiungi tutti i valori dallo schema
+        for key in self.config_schema.keys():
+            config["computed"][key] = self.get(key)
+        
         return config
     
     def log_config_summary(self) -> None:
@@ -621,13 +823,13 @@ class ConfigurationManager:
         Logga un riepilogo della configurazione.
         """
         self.logger.info("=== Riepilogo Configurazione ===")
-        self.logger.info(f"File .env: {self.env_file}")
         self.logger.info(f"File configurazione: {self.config_file}")
         self.logger.info(f"Domini: {', '.join(self.get_all_domains())}")
         self.logger.info(f"Directory output: {self.get_path('OUTPUT_DIR')}")
         self.logger.info(f"Stadio iniziale: {self.get('START_STAGE', 'crawler')}")
         self.logger.info(f"Ripetizioni analisi Axe: {self.get_int('REPEAT_ANALYSIS', 1)}")
-        self.logger.info(f"Max URL per dominio: {self.get_int('CRAWLER_MAX_URLS', 500)}")
-        self.logger.info(f"Modalità ibrida: {self.get_bool('CRAWLER_HYBRID_MODE', True)}")
+        self.logger.info(f"Max URL per dominio: {self.get_int('CRAWLER_MAX_URLS')}")
+        self.logger.info(f"Modalità ibrida: {self.get_bool('CRAWLER_HYBRID_MODE')}")
+        self.logger.info(f"Soglia Selenium: {self.get_int('CRAWLER_PENDING_THRESHOLD')}")
         self.logger.info(f"Email destinatario: {self.get('EMAIL_RECIPIENT', 'non impostato')}")
         self.logger.info("=== Fine Riepilogo ===")

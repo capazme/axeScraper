@@ -23,9 +23,9 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 
 # Import configuration management
-from ..utils.config_manager import ConfigurationManager
-from ..utils.logging_config import get_logger
-from ..utils.output_manager import OutputManager
+from utils.config_manager import ConfigurationManager
+from utils.logging_config import get_logger
+from utils.output_manager import OutputManager
 
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")

@@ -33,9 +33,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from .excel_report import rename_headers
 
 # Import configuration management
-from ..utils.config_manager import ConfigurationManager
-from ..utils.logging_config import get_logger
-from ..utils.output_manager import OutputManager
+from utils.config_manager import ConfigurationManager
+from utils.logging_config import get_logger
+from utils.output_manager import OutputManager
 
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")

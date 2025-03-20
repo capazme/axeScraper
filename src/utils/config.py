@@ -236,7 +236,7 @@ def get_url_config(base_url: str) -> Dict[str, Any]:
             "domains": domain_name,  # Just the domain, not the full URL for multi_domain_crawler
             "max_workers": get_env_int("AXE_CRAWLER_MAX_WORKERS", DEFAULT_MAX_WORKERS),
             "state_file": str(domain_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
-            "max_urls": get_env_int("AXE_CRAWLER_MAX_URLS", 500),
+            "max_urls": get_env_int("AXE_CRAWLER_MAX_URLS", 100),
             "max_retries": get_env_int("AXE_CRAWLER_MAX_RETRIES", 10),
             "request_delay": get_env_float("AXE_CRAWLER_REQUEST_DELAY", 0.25),
             "selenium_browser": get_env_bool("AXE_CRAWLER_USE_SELENIUM", False),

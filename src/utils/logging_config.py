@@ -101,7 +101,7 @@ def get_logger(
             "max_bytes": 10 * 1024 * 1024,
             "backup_count": 5,
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            "date_format": "%Y-%m-%d %H:%M:%S",
+            'datefmt': '%Y-%m-%d %H:%M:%S',
             "components": {}
         }
     
