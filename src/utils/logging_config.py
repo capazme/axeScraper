@@ -22,15 +22,18 @@ def setup_logging(
     # Convert string log level to logging level
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
-        raise ValueError(f"Invalid log level: {log_level}")
+        numeric_level = logging.INFO
         
     # Create logger
     logger = logging.getLogger(component_name)
-    logger.setLevel(numeric_level)
     
-    # Clear any existing handlers
+    # Clear any existing handlers to prevent duplicates
     if logger.hasHandlers():
         logger.handlers.clear()
+    
+    # Set the level
+    logger.setLevel(numeric_level)
+    logger.propagate = False  # Prevent propagation to avoid duplicates
     
     # Create formatter
     formatter = logging.Formatter(log_format, date_format)
@@ -76,11 +79,33 @@ def get_logger(
     output_manager = None
 ) -> logging.Logger:
     """Get properly configured logger for a component."""
-    # Import configuration here to avoid circular imports
-    from .config import LOGGING_CONFIG
+    # Use component_name as a cache key to avoid creating duplicate loggers
+    logger = logging.getLogger(component_name)
     
-    # Merge configurations
-    config = LOGGING_CONFIG.copy()
+    # If this logger is already configured, return it
+    if logger.handlers:
+        return logger
+        
+    # Otherwise, configure it
+    try:
+        # Import configuration here to avoid circular imports
+        from .config_manager import ConfigurationManager
+        config_manager = ConfigurationManager(project_name="axeScraper")
+        config = config_manager.get_logging_config()
+    except ImportError:
+        # Fallback configuration if config_manager can't be imported
+        config = {
+            "level": "INFO",
+            "console_output": True,
+            "rotating_logs": True,
+            "max_bytes": 10 * 1024 * 1024,
+            "backup_count": 5,
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "date_format": "%Y-%m-%d %H:%M:%S",
+            "components": {}
+        }
+    
+    # Merge with provided config
     if log_config:
         for key, value in log_config.items():
             config[key] = value
