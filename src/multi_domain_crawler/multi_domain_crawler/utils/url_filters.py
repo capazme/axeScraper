@@ -140,40 +140,22 @@ class URLFilters:
         return url
 
     @staticmethod
-    def get_domain(url):
+    def get_domain(url: str) -> str:
         """
-        Estrae il dominio da un URL o restituisce il dominio se già in formato dominio.
+        Estrai il dominio base da un URL.
         
         Args:
-            url (str): URL o dominio
+            url: URL completo
             
         Returns:
-            str: Dominio estratto o None se non valido
+            Dominio base
         """
-        if not url:
-            return None
-            
-        try:
-            # Se è già un dominio semplice (non contiene schema o percorso)
-            if '/' not in url and '://' not in url:
-                domain = url.lower()
-                # Rimuovi www. se presente
-                if domain.startswith('www.'):
-                    domain = domain[4:]
-                return domain
-                
-            # Altrimenti, è un URL completo, estrarre il dominio
-            parsed = urlparse(url)
-            netloc = parsed.netloc.lower()
-            
-            # Rimuovi www. dal dominio
-            if netloc.startswith('www.'):
-                netloc = netloc[4:]
-                
-            return netloc or None  # Assicurati di restituire None se netloc è vuoto
-        except Exception:
-            return None
+        # Rimuovi protocollo e www
+        clean_url = url.replace("http://", "").replace("https://", "").replace("www.", "")
         
+        # Estrai solo la parte di dominio
+        return clean_url.split('/')[0]   
+    
     @staticmethod
     def is_same_domain(url1, url2):
         """

@@ -46,12 +46,15 @@ logger = get_logger("axe_analysis", config_manager.get_logging_config()["compone
 # Auto-save interval
 AUTO_SAVE_INTERVAL = config_manager.get_int("CRAWLER_SAVE_INTERVAL", 5)
 
+
 def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[str]:
     """
     Loads URLs from the crawler state file (pickle).
     Supports both old and new formats from multi_domain_crawler.
     """
     path = Path(state_file)
+    logger.info(f"Tentativo di caricamento URL da {state_file}")
+    
     if path.exists():
         try:
             with path.open("rb") as f:
@@ -66,6 +69,15 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
                     if "structures" in data and data["structures"]:
                         urls.extend([data["structures"][t]["url"] for t in data["structures"]])
                         logger.info(f"Loaded {len(urls)} URLs from templates in domain_data[{domain}]")
+            
+            # Check alternative formats in domain_data
+            elif isinstance(state, dict) and any(k for k in state.keys() if isinstance(k, str) and k.endswith(':')):
+                # Format where domain names end with colon
+                for domain, data in state.items():
+                    if isinstance(data, dict) and "structures" in data and data["structures"]:
+                        domain_urls = [data["structures"][t]["url"] for t in data["structures"]]
+                        urls.extend(domain_urls)
+                        logger.info(f"Loaded {len(domain_urls)} URLs from domain {domain}")
                         
             # Fallback to old format
             elif "structures" in state and state["structures"]:
@@ -75,14 +87,22 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
                 urls = list(state["unique_pages"])
                 logger.info(f"Loaded {len(urls)} unique URLs from file using unique_pages")
             else:
-                urls = list(state.get("visited", []))
-                logger.info(f"Loaded {len(urls)} URLs (all) from file")
+                for key in ["visited", "visited_urls", "pages"]:
+                    if key in state and state[key]:
+                        urls = list(state[key])
+                        logger.info(f"Loaded {len(urls)} URLs from '{key}' key")
+                        break
             
             # If no URLs found, use fallback
             if not urls and fallback_urls is not None:
-                logger.info("No URLs found, using fallback.")
+                logger.warning("No URLs found in state file, using fallback")
                 urls = fallback_urls
+                
+            # Remove duplicates
+            urls = list(dict.fromkeys(urls))
+            logger.info(f"Successfully loaded {len(urls)} unique URLs from state file")
             return urls
+            
         except Exception as e:
             logger.exception(f"Error loading state file {state_file}: {e}")
             try:
@@ -94,7 +114,7 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
     else:
         logger.warning(f"State file {state_file} not found.")
         return fallback_urls if fallback_urls is not None else []
-
+    
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=5),

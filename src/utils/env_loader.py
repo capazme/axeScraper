@@ -37,50 +37,70 @@ class EnvLoader:
             return self._env_values
             
         self._env_values = {}
+        env_file_path = None
         
         # Find .env file if not specified
         if not self.env_file:
-            # Search in current directory and parent directories
-            current_dir = Path.cwd()
-            potential_paths = [current_dir]
-            potential_paths.extend(current_dir.parents)
+            # Check common locations
+            search_paths = [
+                Path.cwd() / '.env',                      # Current directory
+                Path.cwd().parent / '.env',               # Parent directory
+                Path(__file__).parent.parent.parent / '.env',  # Project root
+                Path('/home/ec2-user/axeScraper/.env'),   # Common absolute path
+            ]
             
-            for path in potential_paths:
-                env_path = path / '.env'
-                if env_path.exists():
-                    self.env_file = env_path
+            # Add parent directories up to root
+            current_dir = Path.cwd()
+            search_paths.extend([p / '.env' for p in current_dir.parents])
+            
+            # Check all paths
+            for path in search_paths:
+                if path.exists():
+                    env_file_path = path
                     break
+        else:
+            env_file_path = Path(self.env_file)
+            if not env_file_path.exists():
+                print(f"Warning: Specified env file {env_file_path} not found")
+                env_file_path = None
         
         # If .env file exists, load it
-        if self.env_file and Path(self.env_file).exists():
-            with open(self.env_file, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    # Skip empty lines and comments
-                    if not line or line.startswith('#'):
-                        continue
-                        
-                    # Handle variable assignments
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
-                        
-                        # Remove quotes if present
-                        if (value.startswith('"') and value.endswith('"')) or \
-                           (value.startswith("'") and value.endswith("'")):
-                            value = value[1:-1]
+        if env_file_path and env_file_path.exists():
+            try:
+                print(f"Loading environment from: {env_file_path}")
+                with open(env_file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if not line or line.startswith('#'):
+                            continue
                             
-                        # Handle variable substitution
-                        if '$' in value:
-                            value = self._substitute_variables(value)
+                        # Handle variable assignments
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
                             
-                        # Store the value
-                        self._env_values[key] = value
-                        
-                        # Also set as environment variable if not already set
-                        if key not in os.environ:
-                            os.environ[key] = value
+                            # Remove quotes if present
+                            if (value.startswith('"') and value.endswith('"')) or \
+                            (value.startswith("'") and value.endswith("'")):
+                                value = value[1:-1]
+                                
+                            # Handle variable substitution
+                            if '$' in value:
+                                value = self._substitute_variables(value)
+                                
+                            # Store the value
+                            self._env_values[key] = value
+                            
+                            # Also set as environment variable if not already set
+                            if key not in os.environ:
+                                os.environ[key] = value
+                print(f"Loaded {len(self._env_values)} environment variables from {env_file_path}")
+            except Exception as e:
+                print(f"Error loading .env file {env_file_path}: {e}")
+        else:
+            print("No .env file found, using only environment variables")
         
         self._loaded = True
         return self._env_values

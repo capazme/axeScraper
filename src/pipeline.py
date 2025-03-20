@@ -118,8 +118,12 @@ def run_multi_domain_crawler(base_url: str, crawler_config: Dict[str, Any], outp
     log_file = str(output_manager.get_timestamped_path(
         "logs", f"crawler_{output_manager.domain_slug}", "log"))
     
+    # Estrai il dominio base senza path
+    clean_domain = output_manager.domain.replace("http://", "").replace("https://", "").replace("www.", "")
+    clean_domain = clean_domain.split('/')[0]
+    
     # Get crawler parameters from crawler_config
-    domains = crawler_config.get("domains", base_url)
+    domains = crawler_config.get("domains", clean_domain)  # Usa il dominio pulito
     max_urls_per_domain = crawler_config.get("max_urls", 1000)
     hybrid_mode = "True" if crawler_config.get("hybrid_mode", True) else "False"
     
@@ -239,24 +243,17 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
     # Get axe configuration
     axe_config = domain_config.get("axe_config", {})
     
-    # Get standardized paths
-    # In run_axe_analysis, modifica questo codice:
-    analysis_state_file = str(output_manager.get_path(
-        "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
-
-    # Controlla se esiste, altrimenti cerca nel percorso alternativo
+    # Use the output manager to get the best path
+    analysis_state_file = str(output_manager.get_crawler_state_path())
+    
     if not os.path.exists(analysis_state_file):
-        # Estrai il dominio base
-        domain_base = base_url.replace("http://", "").replace("https://", "").replace("www.", "")
-        domain_base = domain_base.split('/')[0]  # Prendi solo la parte del dominio
+        logger.warning(f"Crawler state file not found at primary path: {analysis_state_file}")
+        logger.info("Searching for alternate state files...")
         
-        # Percorso alternativo con sottodirectory del dominio
-        alt_state_file = str(output_manager.get_path(
-            "crawler", f"{domain_base}/crawler_state_{domain_base}.pkl"))
-            
-        if os.path.exists(alt_state_file):
-            analysis_state_file = alt_state_file
-            logger.info(f"Usando percorso alternativo per state file: {analysis_state_file}")
+        # Prova a cercare in posizioni alternative (gestite internamente da get_crawler_state_path)
+        analysis_state_file = str(output_manager.get_crawler_state_path())
+    
+    # Altre definizioni di percorso
     excel_filename = str(output_manager.get_path(
         "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
     visited_file = str(output_manager.get_path(
@@ -268,7 +265,12 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
     # Verify dependencies
     if not os.path.exists(analysis_state_file):
         logger.error(f"Required crawler state file not found: {analysis_state_file}")
-        return False
+        # Ancora una chance se il crawler è stato avviato senza registrare lo stato
+        fallback_urls = [base_url]
+        logger.warning(f"Using fallback URL: {base_url}")
+    else:
+        fallback_urls = [base_url]
+        logger.info(f"Using state file: {analysis_state_file}")
     
     try:
         # Create analyzer with standardized paths
@@ -277,7 +279,7 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
             analysis_state_file=analysis_state_file,
             domains=axe_config.get("domains"),
             max_templates_per_domain=axe_config.get("max_templates_per_domain"),
-            fallback_urls=[base_url],
+            fallback_urls=fallback_urls,
             pool_size=axe_config.get("pool_size", 5),
             sleep_time=axe_config.get("sleep_time", 1),
             excel_filename=excel_filename,
@@ -302,7 +304,7 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
     except Exception as e:
         logger.exception(f"Error in Axe analysis: {e}")
         return False
-
+    
 async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Generate final accessibility report with standardized path management."""
     logger.info(f"Generating final report for {base_url}")
@@ -382,14 +384,34 @@ async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_
     except Exception as e:
         logger.exception(f"Error generating final report: {e}")
         return None
+
 async def process_url(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Process a URL through the complete pipeline with explicit stage progression."""
     logger.info(f"Processing {base_url} through the pipeline")
     
+    # Controlla se ci sono già dati in strutture diverse
+    domain_slug = output_manager.domain_slug
+    output_root = Path(output_manager.base_dir)
     # Get pipeline configuration
     pipeline_config = config_manager.get_pipeline_config()
     start_stage = pipeline_config.get("start_stage", "crawler")
     repeat_axe = pipeline_config.get("repeat_axe", 1)
+    
+    # Verifica se ci sono directory esistenti con dati
+    alternate_path = None
+    for item in output_root.iterdir():
+        if item.is_dir() and domain_slug in item.name and item != output_manager.get_path("root"):
+            crawler_output = item / "crawler_output"
+            if crawler_output.exists():
+                for domain_dir in crawler_output.iterdir():
+                    if domain_dir.is_dir() and domain_slug in domain_dir.name:
+                        state_file = domain_dir / f"crawler_state_{domain_dir.name}.pkl"
+                        if state_file.exists():
+                            alternate_path = state_file
+                            logger.info(f"Trovato state file alternativo: {alternate_path}")
+                            break
+            if alternate_path:
+                break
     
     # Run crawler if starting from that stage
     if start_stage == "crawler":
@@ -467,59 +489,47 @@ async def main():
         # Get domain configuration
         domain_config = config_manager.load_domain_config(base_url)
         
+        # Estrai dominio base per consistenza
+        clean_domain = base_url.replace("http://", "").replace("https://", "").replace("www.", "")
+        clean_domain = clean_domain.split('/')[0]
+        
         # Create output manager for this domain
         output_root = config_manager.get_path("OUTPUT_DIR", "~/axeScraper/output", create=True)
-        output_managers[base_url] = OutputManager(
+        output_manager = OutputManager(
             base_dir=output_root,
-            domain=base_url,
+            domain=clean_domain,  # Usa solo il dominio base!
             create_dirs=True
         )
-    
-    # Start resource monitoring
-    resource_monitor = asyncio.create_task(monitor_resources())
-    
-    # Process each URL through the pipeline
-    report_paths = []
-    for base_url in base_urls:
-        if shutdown_flag:
-            logger.warning("Shutdown requested, stopping pipeline")
-            break
-            
-        logger.info(f"Processing URL: {base_url}")
-        domain_config = config_manager.load_domain_config(base_url)
-        output_manager = output_managers[base_url]
         
-        # Run the URL through all appropriate pipeline stages
-        report_path = await process_url(base_url, domain_config, output_manager)
-        if report_path:
-            report_paths.append(report_path)
-    
-    # Send email with reports if configured
-    email_config = config_manager.get_email_config()
-    if not shutdown_flag and report_paths and email_config.get("recipient_email"):
-        try:
-            logger.info(f"Sending email with {len(report_paths)} reports")
-            send_email_report(report_paths)
-            logger.info("Email sent successfully")
-        except Exception as e:
-            logger.error(f"Error sending email: {e}")
-    
-    # Calculate total execution time
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    hours, remainder = divmod(elapsed_time, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    
-    # Log pipeline completion
-    logger.info(f"Pipeline completed in {int(hours)}:{int(minutes):02}:{int(seconds):02}")
-    logger.info(f"Processed {len(base_urls)} URLs, generated {len(report_paths)} reports")
-    
-    # Stop resource monitoring
-    resource_monitor.cancel()
-    try:
-        await resource_monitor
-    except asyncio.CancelledError:
-        pass
+        # Cerca eventuali directory già esistenti
+        domain_slug = output_manager.domain_slug
+        existing_dirs = []
+        
+        # Cerca directory che potrebbero contenere dati per questo dominio
+        for item in output_root.iterdir():
+            if item.is_dir():
+                # Verifica se il nome contiene il dominio di base
+                if domain_slug in item.name:
+                    # Verifica se contiene directory di output del crawler o axe
+                    if (item / "crawler_output").exists() or (item / "axe_output").exists():
+                        existing_dirs.append(item)
+        
+        # Se ci sono directory esistenti, usa la prima
+        if existing_dirs:
+            logger.info(f"Trovate directory esistenti per {clean_domain}: {[d.name for d in existing_dirs]}")
+            # Usa la directory con più file o, in caso di parità, la prima
+            existing_dir = max(existing_dirs, key=lambda d: sum(1 for _ in d.glob("**/*")))
+            logger.info(f"Usando directory esistente: {existing_dir.name}")
+            
+            # Ricrea l'output manager con la directory esistente
+            output_manager = OutputManager(
+                base_dir=output_root,
+                domain=clean_domain,
+                create_dirs=True,
+                config={"root": existing_dir}
+            )
+        
+        output_managers[base_url] = output_manager
 
 if __name__ == "__main__":
     try:

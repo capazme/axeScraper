@@ -103,10 +103,24 @@ done
 
 # Find the correct .env file
 if [ -z "$CONFIG_FILE" ]; then
-    if [ -f "$PROJECT_ROOT/.env" ]; then
-        CONFIG_FILE="$PROJECT_ROOT/.env"
-        echo -e "${BLUE}Using configuration from: $CONFIG_FILE${NC}"
-    else
+    # Search paths in order of preference
+    SEARCH_PATHS=(
+        "$PROJECT_ROOT/.env"
+        "$PROJECT_ROOT/../.env"
+        "/home/ec2-user/axeScraper/.env"
+        "$HOME/axeScraper/.env"
+    )
+    
+    for path in "${SEARCH_PATHS[@]}"; do
+        if [ -f "$path" ]; then
+            CONFIG_FILE="$path"
+            echo -e "${BLUE}Using configuration from: $CONFIG_FILE${NC}"
+            break
+        fi
+    done
+    
+    # If still not found, create from template
+    if [ -z "$CONFIG_FILE" ]; then
         echo -e "${YELLOW}No .env file found. Creating default from template...${NC}"
         if [ -f "$PROJECT_ROOT/.env.template" ]; then
             cp "$PROJECT_ROOT/.env.template" "$PROJECT_ROOT/.env"
@@ -116,6 +130,16 @@ if [ -z "$CONFIG_FILE" ]; then
             echo -e "${YELLOW}No .env.template found. Will use default values.${NC}"
         fi
     fi
+fi
+
+# Export variables from .env file if found
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    echo -e "${YELLOW}Loading environment variables from: $CONFIG_FILE${NC}"
+    # Export variables directly in the shell
+    set -o allexport
+    source "$CONFIG_FILE"
+    set +o allexport
+    echo -e "${GREEN}Environment variables loaded${NC}"
 fi
 
 # Activate virtual environment

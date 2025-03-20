@@ -2,24 +2,22 @@
 import os
 import json
 import yaml
+import logging
 import multiprocessing
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, TypeVar, Set, Callable
-import logging
+import datetime
 
-from .env_loader import EnvLoader
-
-# Type variable for generic functions
 T = TypeVar('T')
 
 class ConfigurationManager:
     """
-    Centralized configuration manager that integrates multiple sources:
-    - Command-line arguments (highest priority)
-    - Environment variables
-    - .env file
-    - Configuration files (.json, .yaml, etc.)
-    - Default values (lowest priority)
+    Gestore centralizzato delle configurazioni che integra più fonti:
+    - Argomenti da linea di comando (priorità massima)
+    - Variabili d'ambiente
+    - File .env
+    - File di configurazione (.json, .yaml, ecc.)
+    - Valori predefiniti (priorità minima)
     """
     
     def __init__(
@@ -30,114 +28,265 @@ class ConfigurationManager:
         cli_args: Optional[Dict[str, Any]] = None
     ):
         """
-        Initialize the configuration manager.
+        Inizializza il gestore di configurazione.
         
         Args:
-            project_name: Name of the project
-            env_file: Path to .env file
-            config_file: Path to configuration file
-            cli_args: Command-line arguments
+            project_name: Nome del progetto
+            env_file: Percorso del file .env
+            config_file: Percorso del file di configurazione
+            cli_args: Argomenti da linea di comando
         """
         self.project_name = project_name
-        self.env_file = env_file
-        self.config_file = config_file
+        self.env_file = self._find_env_file(env_file)
+        self.config_file = self._find_config_file(config_file)
         self.cli_args = cli_args or {}
         
-        # Initialize logger
+        # Configura il logger
         self.logger = logging.getLogger(f"{project_name}.config")
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
         
-        # Initialize environment loader
-        self.env_loader = EnvLoader(env_file)
-        
-        # Load configuration from env file
-        self.env_loader.load()
-        
-        # Configuration cache
-        self._config_cache = {}
-        
-        # Load configuration from file if specified
-        self._file_config = self._load_config_file()
-        
-        # System resource information
+        # Informazioni sul sistema
         self.cpu_count = multiprocessing.cpu_count()
         
-    def _load_config_file(self) -> Dict[str, Any]:
+        # Timestamp di inizializzazione
+        self.init_time = datetime.datetime.now()
+        
+        # Variabili d'ambiente caricate
+        self._env_vars = {}
+        
+        # Configurazione caricata da file
+        self._file_config = {}
+        
+        # Cache delle configurazioni
+        self._config_cache = {}
+        
+        # Flag di debug
+        self.debug_mode = False
+        
+        # Carica le configurazioni
+        self.reload_config()
+        
+        self.logger.info(f"ConfigurationManager inizializzato: {project_name}")
+        self.logger.info(f"File .env: {self.env_file}")
+        self.logger.info(f"File configurazione: {self.config_file}")
+    
+    def _find_env_file(self, env_file: Optional[Union[str, Path]]) -> Optional[Path]:
         """
-        Load configuration from a file.
+        Trova il file .env se non specificato.
+        
+        Args:
+            env_file: Percorso specificato o None
+            
+        Returns:
+            Percorso del file .env o None
+        """
+        if env_file:
+            return Path(env_file)
+            
+        # Cerca nei percorsi standard
+        search_paths = [
+            Path.cwd() / '.env',
+            Path.cwd().parent / '.env',
+            Path.home() / 'axeScraper' / '.env',
+            Path('/etc/axeScraper/.env')
+        ]
+        
+        for path in search_paths:
+            if path.exists():
+                return path
+                
+        return None
+    
+    def _find_config_file(self, config_file: Optional[Union[str, Path]]) -> Optional[Path]:
+        """
+        Trova il file di configurazione se non specificato.
+        
+        Args:
+            config_file: Percorso specificato o None
+            
+        Returns:
+            Percorso del file di configurazione o None
+        """
+        if config_file:
+            return Path(config_file)
+            
+        # Cerca nei percorsi standard
+        search_paths = [
+            Path.cwd() / 'config.json',
+            Path.cwd() / 'config.yaml',
+            Path.cwd() / 'config.yml',
+            Path.cwd().parent / 'config.json',
+            Path.home() / 'axeScraper' / 'config.json',
+            Path('/etc/axeScraper/config.json')
+        ]
+        
+        for path in search_paths:
+            if path.exists():
+                return path
+                
+        return None
+    
+    def reload_config(self) -> bool:
+        """
+        Ricarica tutte le configurazioni.
         
         Returns:
-            Configuration dictionary
+            True se la ricarica è avvenuta con successo
         """
-        if not self.config_file:
-            # Check environment variable for config file
-            config_file_env = self.env_loader.get("AXE_CONFIG_FILE")
-            if config_file_env:
-                self.config_file = Path(config_file_env)
+        # Svuota la cache
+        self._config_cache = {}
         
-        if not self.config_file or not Path(self.config_file).exists():
+        # Carica le variabili d'ambiente
+        self._load_env_vars()
+        
+        # Carica la configurazione da file
+        self._load_file_config()
+        
+        self.logger.info("Configurazione ricaricata")
+        return True
+    
+    def _load_env_vars(self) -> Dict[str, str]:
+        """
+        Carica le variabili d'ambiente dal file .env e dall'ambiente,
+        dando priorità al file .env.
+        
+        Returns:
+            Dizionario delle variabili d'ambiente
+        """
+        # Inizializza con le variabili di sistema
+        system_env = {k: v for k, v in os.environ.items()}
+        
+        # Inizializza un dizionario vuoto per le variabili caricate
+        self._env_vars = {}
+        
+        # Carica dal file .env se esiste
+        if self.env_file and self.env_file.exists():
+            try:
+                with open(self.env_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Salta righe vuote e commenti
+                        if not line or line.startswith('#'):
+                            continue
+                            
+                        # Elabora le righe con formato KEY=VALUE
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Rimuovi le virgolette se presenti
+                            if (value.startswith('"') and value.endswith('"')) or \
+                            (value.startswith("'") and value.endswith("'")):
+                                value = value[1:-1]
+                                
+                            # Salva la variabile, SOVRASCRIVENDO quelle di sistema
+                            self._env_vars[key] = value
+                                
+            except Exception as e:
+                self.logger.error(f"Errore caricando il file .env: {e}")
+        
+        # Aggiungi le variabili di sistema che NON sono state sovrascritte dal file .env
+        for key, value in system_env.items():
+            if key not in self._env_vars:
+                self._env_vars[key] = value
+        
+        return self._env_vars
+    
+    def _load_file_config(self) -> Dict[str, Any]:
+        """
+        Carica la configurazione da file se specificato.
+        
+        Returns:
+            Configurazione dal file
+        """
+        self._file_config = {}
+        
+        if not self.config_file or not self.config_file.exists():
             return {}
             
-        config_path = Path(self.config_file)
-        
         try:
-            with open(config_path, 'r') as f:
-                if config_path.suffix.lower() == '.json':
-                    return json.load(f)
-                elif config_path.suffix.lower() in ('.yaml', '.yml'):
-                    return yaml.safe_load(f)
+            with open(self.config_file, 'r') as f:
+                if self.config_file.suffix.lower() == '.json':
+                    self._file_config = json.load(f)
+                elif self.config_file.suffix.lower() in ('.yaml', '.yml'):
+                    self._file_config = yaml.safe_load(f)
                 else:
-                    # Try to parse as a simple key=value file
-                    config = {}
+                    # Tenta di parsare come file key=value
                     for line in f:
                         line = line.strip()
                         if not line or line.startswith('#'):
                             continue
                         if '=' in line:
                             key, value = line.split('=', 1)
-                            config[key.strip()] = value.strip()
-                    return config
+                            self._file_config[key.strip()] = value.strip()
+                            
+            # Log in modalità debug
+            if self.debug_mode:
+                self.logger.debug(f"Loaded configuration from file: {self.config_file}")
+                
+            return self._file_config
         except Exception as e:
-            self.logger.error(f"Error loading configuration file {config_path}: {e}")
+            self.logger.error(f"Errore caricando il file di configurazione {self.config_file}: {e}")
             return {}
     
     def get(
         self, 
         key: str, 
         default: Optional[T] = None,
-        transform: Optional[Callable[[Any], T]] = None
+        transform: Optional[Callable[[Any], T]] = None,
+        use_cache: bool = True
     ) -> T:
         """
-        Get a configuration value with priority handling.
+        Ottiene un valore di configurazione con gestione delle priorità.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
-            transform: Optional function to transform the value
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
+            transform: Funzione opzionale per trasformare il valore
+            use_cache: Se usare la cache o ricaricare
             
         Returns:
-            Configuration value
+            Valore di configurazione
         """
-        # Check cache first
-        if key in self._config_cache:
+        # Controlla se è necessario ricaricare
+        if not use_cache and key in self._config_cache:
+            del self._config_cache[key]
+            
+        # Usa la cache se disponibile
+        if use_cache and key in self._config_cache:
             return self._config_cache[key]
             
-        # Priority order:
-        # 1. Command-line arguments
-        # 2. Environment variables
-        # 3. Configuration file
-        # 4. Default value
+        # Ordine di priorità:
+        # 1. Argomenti da linea di comando
+        # 2. Variabili d'ambiente (con prefisso AXE_)
+        # 3. Variabili d'ambiente (senza prefisso)
+        # 4. File di configurazione
+        # 5. Valore predefinito
         
-        # Command-line arguments have highest priority
+        # 1. Argomenti da linea di comando
         if key in self.cli_args:
             value = self.cli_args[key]
+            source = "CLI args"
         else:
-            # Environment variables (with prefix)
+            # 2. Variabili d'ambiente con prefisso AXE_
             env_key = f"AXE_{key.upper()}"
-            value = self.env_loader.get(env_key)
+            value = self._env_vars.get(env_key)
+            source = f"env var {env_key}"
             
-            # If not found in environment, check config file
+            # 3. Variabili d'ambiente senza prefisso
             if value is None:
-                # Support nested keys with dot notation
+                env_key = key.upper()
+                value = self._env_vars.get(env_key)
+                source = f"env var {env_key}"
+                
+            # 4. File di configurazione
+            if value is None:
+                # Supporta chiavi nidificate con notazione a punti
                 if '.' in key:
                     parts = key.split('.')
                     config = self._file_config
@@ -150,38 +299,45 @@ class ConfigurationManager:
                 else:
                     value = self._file_config.get(key)
                 
-                # If still not found, use default
+                source = "config file"
+                
+                # 5. Valore predefinito
                 if value is None:
                     value = default
+                    source = "default value"
         
-        # Apply transformation if provided
+        # Applica la trasformazione se fornita
         if transform and value is not None:
             try:
                 value = transform(value)
             except Exception as e:
-                self.logger.warning(f"Error transforming value for {key}: {e}")
+                self.logger.warning(f"Errore trasformando valore per {key}: {e}")
                 value = default
         
-        # Cache the result
+        # Log in modalità debug
+        if self.debug_mode:
+            self.logger.debug(f"Config get: {key} = {value} (from {source})")
+        
+        # Memorizza nella cache
         self._config_cache[key] = value
         
         return value
     
     def get_bool(self, key: str, default: bool = False) -> bool:
         """
-        Get a boolean configuration value.
+        Ottiene un valore booleano.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
             
         Returns:
-            Boolean configuration value
+            Valore booleano
         """
         return self.get(key, default, lambda v: self._to_bool(v, default))
     
     def _to_bool(self, value: Any, default: bool) -> bool:
-        """Convert a value to boolean."""
+        """Converte un valore in booleano."""
         if isinstance(value, bool):
             return value
             
@@ -196,27 +352,27 @@ class ConfigurationManager:
     
     def get_int(self, key: str, default: int = 0) -> int:
         """
-        Get an integer configuration value.
+        Ottiene un valore intero.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
             
         Returns:
-            Integer configuration value
+            Valore intero
         """
         return self.get(key, default, lambda v: int(v))
     
     def get_float(self, key: str, default: float = 0.0) -> float:
         """
-        Get a float configuration value.
+        Ottiene un valore float.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
             
         Returns:
-            Float configuration value
+            Valore float
         """
         return self.get(key, default, lambda v: float(v))
     
@@ -227,15 +383,15 @@ class ConfigurationManager:
         separator: str = ','
     ) -> List[str]:
         """
-        Get a list configuration value.
+        Ottiene un valore lista.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
-            separator: Separator to split the string into a list
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
+            separator: Separatore per dividere la stringa in lista
             
         Returns:
-            List configuration value
+            Valore lista
         """
         if default is None:
             default = []
@@ -243,11 +399,14 @@ class ConfigurationManager:
         return self.get(key, default, lambda v: self._to_list(v, separator, default))
     
     def _to_list(self, value: Any, separator: str, default: List[str]) -> List[str]:
-        """Convert a value to a list."""
+        """Converte un valore in lista."""
         if isinstance(value, list):
             return value
             
         if isinstance(value, str):
+            # Gestisce il caso in cui la stringa rappresenti una lista vuota
+            if value in ('[]', '""', "''", ''):
+                return []
             return [item.strip() for item in value.split(separator) if item.strip()]
             
         return default
@@ -259,35 +418,68 @@ class ConfigurationManager:
         create: bool = False
     ) -> Path:
         """
-        Get a path configuration value.
+        Ottiene un percorso.
         
         Args:
-            key: Configuration key
-            default: Default value if not found
-            create: Whether to create the directory if it doesn't exist
+            key: Chiave di configurazione
+            default: Valore predefinito se non trovato
+            create: Se creare la directory se non esiste
             
         Returns:
-            Path configuration value
+            Oggetto Path
         """
         path = self.get(key, default, lambda v: Path(str(v)).expanduser())
         
         if create and path:
-            os.makedirs(path, exist_ok=True)
-            
+            try:
+                os.makedirs(path, exist_ok=True)
+                if self.debug_mode:
+                    self.logger.debug(f"Directory creata: {path}")
+            except Exception as e:
+                self.logger.error(f"Errore creando directory {path}: {e}")
+                
         return path
     
     def get_nested(self, key_path: str, default: Optional[T] = None) -> T:
         """
-        Get a nested configuration value using dot notation.
+        Ottiene un valore di configurazione nidificato usando notazione a punti.
         
         Args:
-            key_path: Nested key path (e.g., "crawler.max_urls")
-            default: Default value if not found
+            key_path: Percorso nidificato (es. "crawler.max_urls")
+            default: Valore predefinito se non trovato
             
         Returns:
-            Nested configuration value
+            Valore di configurazione nidificato
         """
         return self.get(key_path, default)
+    
+    def domain_to_slug(self, domain: str) -> str:
+        """
+        Convert a domain to a safe slug for filesystem use.
+        
+        Args:
+            domain: Domain name or URL
+            
+        Returns:
+            Safe slug for filesystem use
+        """
+        # Rimuovi protocollo e www, ed estrai solo il dominio base
+        domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
+        
+        # Estrai solo la parte del dominio (senza path)
+        domain = domain.split('/')[0]
+        
+        # Replace non-alphanumeric characters with underscores
+        return "".join(c if c.isalnum() else "_" for c in domain)
+    
+    def get_all_domains(self) -> List[str]:
+        """
+        Ottiene tutti i domini configurati.
+        
+        Returns:
+            Lista dei domini
+        """
+        return self.get_list("BASE_URLS", [])
     
     def load_domain_config(self, domain: str) -> Dict[str, Any]:
         """
@@ -301,6 +493,9 @@ class ConfigurationManager:
         """
         # Get domain slug for consistent reference
         domain_slug = self.domain_to_slug(domain)
+        
+        # Clean domain for directory naming
+        clean_domain = domain.replace("http://", "").replace("https://", "").replace("www.", "").split('/')[0]
         
         # Get base URLs
         base_urls = self.get_list("BASE_URLS")
@@ -321,15 +516,27 @@ class ConfigurationManager:
             "temp": domain_root / "temp"
         }
         
+        # Alternate directory paths
+        alt_root = output_root / clean_domain
+        if alt_root.exists() and alt_root != domain_root:
+            self.logger.info(f"Found alternate domain directory: {alt_root}")
+            output_dirs = {
+                "root": alt_root,
+                "crawler": alt_root / "crawler_output",
+                "axe": alt_root / "axe_output",
+                "analysis": alt_root / "analysis_output",
+                "reports": alt_root / "reports",
+                "logs": alt_root / "logs",
+                "charts": alt_root / "charts",
+                "temp": alt_root / "temp"
+            }
+        
         # Create directories if needed
         if self.get_bool("CREATE_DIRS", True):
             for dir_path in output_dirs.values():
                 os.makedirs(dir_path, exist_ok=True)
         
-        # Extract domain without www. prefix
-        clean_domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
-        
-        # Crawler configuration
+        # Crawler configuration with flexible state file paths
         crawler_config = {
             "domains": clean_domain,
             "max_urls": self.get_int("CRAWLER_MAX_URLS", 500),
@@ -342,7 +549,14 @@ class ConfigurationManager:
             "state_file": str(output_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
         }
         
-        # Axe analysis configuration
+        # Add alternate state file paths for more robustness
+        crawler_config["alternate_state_files"] = [
+            str(output_dirs["crawler"] / f"crawler_state_{clean_domain}.pkl"),
+            str(output_dirs["crawler"] / clean_domain / f"crawler_state_{clean_domain}.pkl"),
+            str(output_root / f"crawler_state_{clean_domain}.pkl")
+        ]
+            
+        # Configurazione di Axe analysis
         axe_config = {
             "domains": clean_domain,
             "max_templates_per_domain": self.get_int("MAX_TEMPLATES", 50),
@@ -355,9 +569,10 @@ class ConfigurationManager:
             "output_folder": str(output_dirs["axe"]),
         }
         
-        # Final report configuration
+        # Configurazione del report finale
         report_config = {
             "input_excel": str(output_dirs["axe"] / f"accessibility_report_{domain_slug}.xlsx"),
+            "concat_excel": str(output_dirs["analysis"] / f"accessibility_report_{domain_slug}_concat.xlsx"),
             "output_excel": str(output_dirs["analysis"] / f"final_analysis_{domain_slug}.xlsx"),
             "crawler_state": str(output_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
             "charts_dir": str(output_dirs["charts"]),
@@ -371,38 +586,13 @@ class ConfigurationManager:
             "axe_config": axe_config,
             "report_config": report_config
         }
-    
-    def domain_to_slug(self, domain: str) -> str:
-        """
-        Convert a domain to a safe slug for filesystem use.
-        
-        Args:
-            domain: Domain name or URL
-            
-        Returns:
-            Safe slug for filesystem use
-        """
-        # Remove HTTP/HTTPS and www prefix
-        domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
-        
-        # Replace non-alphanumeric characters with underscores
-        return "".join(c if c.isalnum() else "_" for c in domain)
-    
-    def get_all_domains(self) -> List[str]:
-        """
-        Get all configured domains.
-        
-        Returns:
-            List of domains
-        """
-        return self.get_list("BASE_URLS", [])
-    
+
     def get_pipeline_config(self) -> Dict[str, Any]:
         """
-        Get pipeline-specific configuration.
+        Ottiene la configurazione specifica per la pipeline.
         
         Returns:
-            Pipeline configuration
+            Configurazione della pipeline
         """
         return {
             "start_stage": self.get("START_STAGE", "crawler"),
@@ -418,10 +608,10 @@ class ConfigurationManager:
     
     def get_logging_config(self) -> Dict[str, Any]:
         """
-        Get logging configuration.
+        Ottiene la configurazione del logging.
         
         Returns:
-            Logging configuration
+            Configurazione del logging
         """
         output_root = self.get_path("OUTPUT_DIR", "~/axeScraper/output")
         log_dir = self.get_path("LOG_DIR", output_root / "logs", create=True)
@@ -436,7 +626,7 @@ class ConfigurationManager:
             "max_bytes": self.get_int("LOG_MAX_BYTES", 10 * 1024 * 1024),  # 10 MB
             "backup_count": self.get_int("LOG_BACKUP_COUNT", 5),
             
-            # Component-specific log levels
+            # Livelli di log specifici per componente
             "components": {
                 "crawler": {
                     "level": self.get("CRAWLER_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
@@ -459,10 +649,10 @@ class ConfigurationManager:
     
     def get_email_config(self) -> Dict[str, Any]:
         """
-        Get email configuration.
+        Ottiene la configurazione dell'email.
         
         Returns:
-            Email configuration
+            Configurazione dell'email
         """
         return {
             "recipient_email": self.get("EMAIL_RECIPIENT", "example@example.com"),
@@ -476,31 +666,56 @@ class ConfigurationManager:
             "mutt_command": self.get("MUTT_COMMAND", "mutt -s"),
         }
     
-    def as_dict(self) -> Dict[str, Any]:
+    def set_debug_mode(self, enabled: bool = True) -> None:
         """
-        Get all configuration as a dictionary.
+        Attiva o disattiva la modalità debug.
+        
+        Args:
+            enabled: Se attivare la modalità debug
+        """
+        self.debug_mode = enabled
+        if enabled:
+            self.logger.setLevel(logging.DEBUG)
+            self.logger.debug("Modalità debug attivata")
+        else:
+            self.logger.setLevel(logging.INFO)
+            self.logger.info("Modalità debug disattivata")
+    
+    def dump_config(self) -> Dict[str, Any]:
+        """
+        Esporta tutta la configurazione come dizionario.
         
         Returns:
-            Complete configuration dictionary
+            Dizionario di tutta la configurazione
         """
-        config = {}
+        config = {
+            "cli_args": self.cli_args,
+            "env_vars": {k: v for k, v in self._env_vars.items() if k.startswith("AXE_")},
+            "file_config": self._file_config,
+            "computed": {}
+        }
         
-        # General configuration
-        config['output_dir'] = str(self.get_path("OUTPUT_DIR", "~/axeScraper/output"))
-        config['base_urls'] = self.get_list("BASE_URLS", [])
-        
-        # Domain configurations
-        config['domains'] = {}
-        for domain in self.get_all_domains():
-            config['domains'][domain] = self.load_domain_config(domain)
-        
-        # Pipeline configuration
-        config['pipeline'] = self.get_pipeline_config()
-        
-        # Logging configuration
-        config['logging'] = self.get_logging_config()
-        
-        # Email configuration
-        config['email'] = self.get_email_config()
+        # Aggiungi configurazioni calcolate
+        config["computed"]["output_dir"] = str(self.get_path("OUTPUT_DIR"))
+        config["computed"]["base_urls"] = self.get_list("BASE_URLS")
+        config["computed"]["pipeline"] = self.get_pipeline_config()
+        config["computed"]["logging"] = self.get_logging_config()
+        config["computed"]["email"] = self.get_email_config()
         
         return config
+    
+    def log_config_summary(self) -> None:
+        """
+        Logga un riepilogo della configurazione.
+        """
+        self.logger.info("=== Riepilogo Configurazione ===")
+        self.logger.info(f"File .env: {self.env_file}")
+        self.logger.info(f"File configurazione: {self.config_file}")
+        self.logger.info(f"Domini: {', '.join(self.get_all_domains())}")
+        self.logger.info(f"Directory output: {self.get_path('OUTPUT_DIR')}")
+        self.logger.info(f"Stadio iniziale: {self.get('START_STAGE', 'crawler')}")
+        self.logger.info(f"Ripetizioni analisi Axe: {self.get_int('REPEAT_ANALYSIS', 1)}")
+        self.logger.info(f"Max URL per dominio: {self.get_int('CRAWLER_MAX_URLS', 500)}")
+        self.logger.info(f"Modalità ibrida: {self.get_bool('CRAWLER_HYBRID_MODE', True)}")
+        self.logger.info(f"Email destinatario: {self.get('EMAIL_RECIPIENT', 'non impostato')}")
+        self.logger.info("=== Fine Riepilogo ===")

@@ -61,6 +61,9 @@ class OutputManager:
         # Remove http/https and www
         clean_domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
         
+        # Estrai solo la parte del dominio (senza path)
+        clean_domain = clean_domain.split('/')[0]
+        
         # Replace non-alphanumeric characters with underscores
         return "".join(c if c.isalnum() else "_" for c in clean_domain)
     
@@ -190,15 +193,31 @@ class OutputManager:
         basic_domain = self.domain.replace("http://", "").replace("https://", "").replace("www.", "")
         basic_domain = basic_domain.split('/')[0]  # Solo la parte del dominio
         
-        # Controlla prima nel formato atteso dalla pipeline
-        primary_path = self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl")
-        if primary_path.exists():
-            return primary_path
+        # Lista di possibili percorsi da controllare in ordine
+        possible_paths = [
+            # Formato standard per il file di stato
+            self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl"),
             
-        # Controlla nel formato usato dal multi_domain_crawler
-        alternate_path = self.get_path("crawler", f"{basic_domain}/crawler_state_{basic_domain}.pkl")
-        if alternate_path.exists():
-            return alternate_path
+            # Formato alternativo usato dal multi_domain_crawler
+            self.get_path("crawler", f"{basic_domain}/crawler_state_{basic_domain}.pkl"),
             
-        # Usa il path primario come default
-        return primary_path
+            # Format with domain as subdirectory 
+            self.get_path("crawler") / basic_domain / f"crawler_state_{basic_domain}.pkl",
+            
+            # Usando solo il dominio di base senza slug
+            self.get_path("crawler", f"crawler_state_{basic_domain}.pkl"),
+            
+            # Formato con dominio come slug
+            self.get_path("root") / "crawler_output" / f"crawler_state_{self.domain_slug}.pkl"
+        ]
+        
+        # Controlla ciascun percorso possibile
+        for path in possible_paths:
+            if path.exists():
+                self.logger.info(f"Trovato file di stato crawler: {path}")
+                return path
+                
+        # Se nessun file esiste, usa il path primario come default
+        default_path = possible_paths[0]
+        self.logger.warning(f"Nessun file di stato crawler trovato, verrà usato: {default_path}")
+        return default_path
