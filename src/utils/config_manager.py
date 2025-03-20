@@ -23,8 +23,7 @@ class ConfigurationManager:
     def __init__(
         self,
         project_name: str = "axeScraper",
-        env_file: Optional[Union[str, Path]] = None,
-        config_file: Optional[Union[str, Path]] = None,
+        config_file: Optional[Union[str, Path]] = "config.json",
         cli_args: Optional[Dict[str, Any]] = None
     ):
         """
@@ -32,12 +31,10 @@ class ConfigurationManager:
         
         Args:
             project_name: Nome del progetto
-            env_file: Percorso del file .env
             config_file: Percorso del file di configurazione
             cli_args: Argomenti da linea di comando
         """
         self.project_name = project_name
-        self.env_file = self._find_env_file(env_file)
         self.config_file = self._find_config_file(config_file)
         self.cli_args = cli_args or {}
         
@@ -51,12 +48,7 @@ class ConfigurationManager:
         
         # Informazioni sul sistema
         self.cpu_count = multiprocessing.cpu_count()
-        
-        # Timestamp di inizializzazione
         self.init_time = datetime.datetime.now()
-        
-        # Variabili d'ambiente caricate
-        self._env_vars = {}
         
         # Configurazione caricata da file
         self._file_config = {}
@@ -71,7 +63,6 @@ class ConfigurationManager:
         self.reload_config()
         
         self.logger.info(f"ConfigurationManager inizializzato: {project_name}")
-        self.logger.info(f"File .env: {self.env_file}")
         self.logger.info(f"File configurazione: {self.config_file}")
     
     def _find_env_file(self, env_file: Optional[Union[str, Path]]) -> Optional[Path]:
@@ -102,19 +93,8 @@ class ConfigurationManager:
         return None
     
     def _find_config_file(self, config_file: Optional[Union[str, Path]]) -> Optional[Path]:
-        """
-        Trova il file di configurazione se non specificato.
-        
-        Args:
-            config_file: Percorso specificato o None
-            
-        Returns:
-            Percorso del file di configurazione o None
-        """
         if config_file:
             return Path(config_file)
-            
-        # Cerca nei percorsi standard
         search_paths = [
             Path.cwd() / 'config.json',
             Path.cwd() / 'config.yaml',
@@ -123,29 +103,16 @@ class ConfigurationManager:
             Path.home() / 'axeScraper' / 'config.json',
             Path('/etc/axeScraper/config.json')
         ]
-        
         for path in search_paths:
             if path.exists():
                 return path
-                
         return None
-    
+
     def reload_config(self) -> bool:
-        """
-        Ricarica tutte le configurazioni.
-        
-        Returns:
-            True se la ricarica è avvenuta con successo
-        """
         # Svuota la cache
         self._config_cache = {}
-        
-        # Carica le variabili d'ambiente
-        self._load_env_vars()
-        
         # Carica la configurazione da file
         self._load_file_config()
-        
         self.logger.info("Configurazione ricaricata")
         return True
     
@@ -198,17 +165,9 @@ class ConfigurationManager:
         return self._env_vars
     
     def _load_file_config(self) -> Dict[str, Any]:
-        """
-        Carica la configurazione da file se specificato.
-        
-        Returns:
-            Configurazione dal file
-        """
         self._file_config = {}
-        
         if not self.config_file or not self.config_file.exists():
             return {}
-            
         try:
             with open(self.config_file, 'r') as f:
                 if self.config_file.suffix.lower() == '.json':
@@ -224,11 +183,8 @@ class ConfigurationManager:
                         if '=' in line:
                             key, value = line.split('=', 1)
                             self._file_config[key.strip()] = value.strip()
-                            
-            # Log in modalità debug
             if self.debug_mode:
                 self.logger.debug(f"Loaded configuration from file: {self.config_file}")
-                
             return self._file_config
         except Exception as e:
             self.logger.error(f"Errore caricando il file di configurazione {self.config_file}: {e}")
@@ -244,69 +200,39 @@ class ConfigurationManager:
         """
         Ottiene un valore di configurazione con gestione delle priorità.
         
-        Args:
-            key: Chiave di configurazione
-            default: Valore predefinito se non trovato
-            transform: Funzione opzionale per trasformare il valore
-            use_cache: Se usare la cache o ricaricare
-            
-        Returns:
-            Valore di configurazione
+        Ordine di priorità:
+        1. Argomenti da linea di comando
+        2. File di configurazione
+        3. Valore predefinito
         """
-        # Controlla se è necessario ricaricare
         if not use_cache and key in self._config_cache:
             del self._config_cache[key]
-            
-        # Usa la cache se disponibile
         if use_cache and key in self._config_cache:
             return self._config_cache[key]
-            
-        # Ordine di priorità:
-        # 1. Argomenti da linea di comando
-        # 2. Variabili d'ambiente (con prefisso AXE_)
-        # 3. Variabili d'ambiente (senza prefisso)
-        # 4. File di configurazione
-        # 5. Valore predefinito
         
         # 1. Argomenti da linea di comando
         if key in self.cli_args:
             value = self.cli_args[key]
             source = "CLI args"
         else:
-            # 2. Variabili d'ambiente con prefisso AXE_
-            env_key = f"AXE_{key.upper()}"
-            value = self._env_vars.get(env_key)
-            source = f"env var {env_key}"
-            
-            # 3. Variabili d'ambiente senza prefisso
+            # 2. File di configurazione
+            if '.' in key:
+                parts = key.split('.')
+                config = self._file_config
+                for part in parts:
+                    if not isinstance(config, dict) or part not in config:
+                        config = None
+                        break
+                    config = config[part]
+                value = config
+            else:
+                value = self._file_config.get(key)
+            source = "config file"
+            # 3. Valore predefinito
             if value is None:
-                env_key = key.upper()
-                value = self._env_vars.get(env_key)
-                source = f"env var {env_key}"
-                
-            # 4. File di configurazione
-            if value is None:
-                # Supporta chiavi nidificate con notazione a punti
-                if '.' in key:
-                    parts = key.split('.')
-                    config = self._file_config
-                    for part in parts:
-                        if not isinstance(config, dict) or part not in config:
-                            config = None
-                            break
-                        config = config[part]
-                    value = config
-                else:
-                    value = self._file_config.get(key)
-                
-                source = "config file"
-                
-                # 5. Valore predefinito
-                if value is None:
-                    value = default
-                    source = "default value"
+                value = default
+                source = "default value"
         
-        # Applica la trasformazione se fornita
         if transform and value is not None:
             try:
                 value = transform(value)
@@ -314,15 +240,12 @@ class ConfigurationManager:
                 self.logger.warning(f"Errore trasformando valore per {key}: {e}")
                 value = default
         
-        # Log in modalità debug
         if self.debug_mode:
             self.logger.debug(f"Config get: {key} = {value} (from {source})")
         
-        # Memorizza nella cache
         self._config_cache[key] = value
-        
         return value
-    
+
     def get_bool(self, key: str, default: bool = False) -> bool:
         """
         Ottiene un valore booleano.
@@ -417,18 +340,7 @@ class ConfigurationManager:
         default: Optional[Union[str, Path]] = None,
         create: bool = False
     ) -> Path:
-        """
-        Ottiene un percorso.
-        
-        Args:
-            key: Chiave di configurazione
-            default: Valore predefinito se non trovato
-            create: Se creare la directory se non esiste
-            
-        Returns:
-            Oggetto Path
-        """
-        path = self.get(key, default, lambda v: Path(str(v)).expanduser())
+        path = self.get(key, default, lambda v: Path(os.path.expandvars(str(v))).expanduser())
         
         if create and path:
             try:
@@ -439,7 +351,7 @@ class ConfigurationManager:
                 self.logger.error(f"Errore creando directory {path}: {e}")
                 
         return path
-    
+
     def get_nested(self, key_path: str, default: Optional[T] = None) -> T:
         """
         Ottiene un valore di configurazione nidificato usando notazione a punti.

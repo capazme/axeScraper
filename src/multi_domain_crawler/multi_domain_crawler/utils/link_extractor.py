@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from scrapy.linkextractors import LinkExtractor as ScrapyLinkExtractor
 
-from multi_domain_crawler.utils.url_filters import URLFilters
+from ..utils.url_filters import URLFilters
 
 logger = logging.getLogger(__name__)
 

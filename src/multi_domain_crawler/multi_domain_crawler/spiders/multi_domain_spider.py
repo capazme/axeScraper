@@ -22,9 +22,9 @@ from scrapy.utils.url import url_has_any_extension
 from scrapy.http import Request
 from scrapy.exceptions import CloseSpider
 
-from multi_domain_crawler.items import PageItem, PageItemLoader
-from multi_domain_crawler.utils.url_filters import URLFilters
-from multi_domain_crawler.utils.link_extractor import AdvancedLinkExtractor
+from ..items import PageItem, PageItemLoader
+from ..utils.url_filters import URLFilters
+from ..utils.link_extractor import AdvancedLinkExtractor
 from scrapy_selenium import SeleniumRequest
 
 # Import configuration system
@@ -33,7 +33,7 @@ import os
 import importlib.util
 try:
     # Try relative import from this package
-    from multi_domain_crawler.utils.config_manager import ConfigurationManager
+    from ....utils.config_manager import ConfigurationManager
 except ImportError:
     # If running standalone, try to find the module in the project
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -142,20 +142,16 @@ class MultiDomainSpider(scrapy.Spider):
         self._log_configuration()
     
     def _initialize_config_manager(self, kwargs):
-        """Initialize the configuration manager if available."""
+        """Initialize the configuration manager using only configuration file and CLI arguments."""
         if ConfigurationManager is None:
             return None
-            
-        # Look for env file in arguments or use default
-        env_file = kwargs.get('env_file', os.environ.get('AXE_ENV_FILE', '.env'))
-        
-        # Create configuration manager with CLI arguments
+        # Non si cerca più il file .env; si passa solo il config_file (se specificato) e i CLI args.
         return ConfigurationManager(
             project_name="axeScraper",
-            env_file=env_file,
+            config_file=kwargs.get('config_file'),  # Puoi passare il percorso al file di configurazione
             cli_args=kwargs
         )
-    
+
     def _extract_domains(self, kwargs):
         domains = []
         
@@ -193,43 +189,40 @@ class MultiDomainSpider(scrapy.Spider):
         
         return domains
     
-    def _get_config(self, kwarg_name, env_name, kwargs, default=None):
+    def _get_config(self, kwarg_name, config_key, kwargs, default=None):
         """
         Get configuration value with proper fallback priority.
         
+        Ordine di priorità:
+        1. Argomenti da linea di comando (CLI args)
+        2. File di configurazione (attraverso il ConfigurationManager)
+        3. Valore predefinito
+        
         Args:
-            kwarg_name: Name of the kwarg key
-            env_name: Name of the environment variable (without AXE_ prefix)
-            kwargs: Keyword arguments dictionary
-            default: Default value if not found in any source
+            kwarg_name: Nome del parametro nei kwargs (CLI)
+            config_key: Chiave del file di configurazione
+            kwargs: Dizionario dei parametri passati
+            default: Valore predefinito se non trovato
             
         Returns:
-            Configuration value
+            Valore di configurazione
         """
-        # 1. Check kwargs (CLI arguments)
+        # 1. Check CLI arguments
         if kwarg_name in kwargs:
             try:
                 return int(kwargs[kwarg_name])
             except (ValueError, TypeError):
                 return kwargs[kwarg_name]
         
-        # 2. Check configuration manager
+        # 2. Check configuration manager (file di configurazione)
         if self.config_manager is not None:
-            value = self.config_manager.get(env_name)
+            value = self.config_manager.get(config_key)
             if value is not None:
                 return value
         
-        # 3. Check environment variables directly
-        env_var = f"AXE_{env_name}"
-        if env_var in os.environ:
-            try:
-                return int(os.environ[env_var])
-            except (ValueError, TypeError):
-                return os.environ[env_var]
-        
-        # 4. Default value
+        # 3. Default value
         return default
-    
+
     def _get_config_bool(self, kwarg_name, env_name, kwargs, default=False):
         """Get boolean configuration with proper type conversion."""
         value = self._get_config(kwarg_name, env_name, kwargs, default)

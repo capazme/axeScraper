@@ -22,19 +22,21 @@ class MultiDomainPipeline:
     separate per ogni dominio.
     """
     
-    def __init__(self, output_dir, keep_html=False, report_format='all'):
+    def __init__(self, output_dir, keep_html=False, report_format='all', output_manager=None):
         """
         Inizializza la pipeline.
         
         Args:
-            output_dir (str): Directory per i dati di output
+            output_dir (str): Directory per i dati di output (usato se output_manager è None)
             keep_html (bool): Se conservare il contenuto HTML completo
             report_format (str): Formato dei report ('all', 'markdown', 'json', 'csv')
+            output_manager (OutputManager, optional): Gestore centralizzato dei percorsi
         """
-        self.output_dir = output_dir
+        self.output_manager = output_manager
+        self.output_dir = output_dir if output_manager is None else None
         self.keep_html = keep_html
         self.report_format = report_format
-        
+            
         # Dati per dominio
         self.domain_data = defaultdict(lambda: {
             'url_tree': defaultdict(set),
@@ -84,8 +86,9 @@ class MultiDomainPipeline:
         Args:
             spider (Spider): Spider in esecuzione
         """
-        # Assicurati che la directory esista
-        if not os.path.exists(self.output_dir):
+        if self.output_manager:
+            self.output_manager.ensure_path_exists("crawler")
+        elif not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
             
         # Prepara directory per ogni dominio conosciuto
@@ -310,8 +313,12 @@ class MultiDomainPipeline:
         Args:
             domain (str): Dominio da salvare
         """
-        domain_dir = os.path.join(self.output_dir, domain)
-        state_file = os.path.join(domain_dir, f'crawler_state_{domain}.pkl')
+        if self.output_manager:
+            state_file = self.output_manager.get_path("crawler", f"crawler_state_{domain}.pkl")
+            self.output_manager.ensure_path_exists("crawler")
+        else:
+            domain_dir = os.path.join(self.output_dir, domain)
+            state_file = os.path.join(domain_dir, f'crawler_state_{domain}.pkl')
         
         # Ottieni i dati per questo dominio
         domain_data = self.domain_data[domain]
@@ -375,7 +382,12 @@ class MultiDomainPipeline:
         Args:
             domain (str): Dominio per cui generare il report
         """
-        domain_dir = os.path.join(self.output_dir, domain)
+        if self.output_manager:
+            domain_dir = str(self.output_manager.get_path("reports", domain))
+            self.output_manager.ensure_path_exists("reports", domain)
+        else:
+            domain_dir = os.path.join(self.output_dir, domain)
+        
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         domain_data = self.domain_data[domain]

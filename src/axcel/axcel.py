@@ -143,144 +143,244 @@ def safe_pickle_dump(data, filename):
     os.replace(tmpfile, filename)
     logger.debug(f"State saved to '{tmpfile}' and replaced in '{filename}'.")
 
-def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templates_per_domain=None, fallback_urls=None) -> list[str]:
+def load_urls_from_multi_domain_output(
+    output_dir: str = None, 
+    output_manager: 'OutputManager' = None,
+    domains=None, 
+    max_templates_per_domain=None, 
+    fallback_urls=None
+) -> list[str]:
     """
-    Load one representative URL for each template from the multi-domain crawler.
+    Carica un URL rappresentativo per ogni template dal multi-domain crawler.
     
-    Supports the new multi_domain_crawler format with a different structure
-    for storing templates and their information.
+    Supporta sia l'uso di OutputManager per una gestione coerente dei path,
+    sia il metodo tradizionale basato sul percorso di output del crawler.
+    
+    Args:
+        output_dir: Directory di output del crawler (usato se output_manager è None)
+        output_manager: Istanza di OutputManager per gestione centralizzata dei path
+        domains: Lista o stringa separata da virgole con i domini da analizzare
+        max_templates_per_domain: Numero massimo di template da analizzare per dominio
+        fallback_urls: URL di fallback se non vengono trovati URL nei template
+        
+    Returns:
+        Lista di URL unici da analizzare (uno per ogni template)
     """
     representative_urls = []
-    output_path = Path(output_dir)
     
-    # If specific domains are provided, use only those
+    # Determina la lista dei domini da analizzare
     if domains:
         domain_list = [d.strip() for d in domains.split(',')] if isinstance(domains, str) else domains
+    elif output_manager:
+        # Se c'è un output_manager, utilizza il suo dominio
+        domain_list = [output_manager.domain_slug]
     else:
-        # Otherwise look for all domain folders in output_dir
+        # Altrimenti cerca tutte le cartelle di dominio nella directory di output
+        output_path = Path(output_dir)
         domain_list = [d.name for d in output_path.glob("*") if d.is_dir() and not d.name.startswith('.')]
     
-    logger.info(f"Looking for representative URLs for domains: {domain_list}")
+    logger.info(f"Ricerca URL rappresentativi per i domini: {domain_list}")
     
     for domain in domain_list:
         domain_templates = []
-        domain_dir = output_path / domain
         
-        # Priority 1: Look for crawler state files (for new multi_domain_crawler format)
-        state_files = list(domain_dir.glob("crawler_state_*.pkl"))
-        if state_files:
-            latest_state = sorted(state_files)[-1]  # Get the most recent
-            logger.info(f"Using crawler state file: {latest_state}")
+        # Usa OutputManager o path diretto a seconda di cosa è disponibile
+        if output_manager:
+            # Se abbiamo l'output_manager, usiamo il suo metodo per trovare i file di stato
+            state_path = output_manager.get_crawler_state_path()
+            if state_path and state_path.exists():
+                logger.info(f"Utilizzo file di stato dal percorso gestito: {state_path}")
+                try:
+                    with open(state_path, 'rb') as f:
+                        state = pickle.load(f)
+                    
+                    # Estrai i template dallo stato caricato
+                    domain_templates.extend(_extract_templates_from_state(state, domain))
+                except Exception as e:
+                    logger.exception(f"Errore caricando il file di stato {state_path}: {e}")
+        else:
+            # Altrimenti, usa il comportamento tradizionale
+            domain_dir = Path(output_dir) / domain
             
-            try:
-                with open(latest_state, 'rb') as f:
-                    state = pickle.load(f)
-                
-                # Handle new multi_domain_crawler format
-                if "domain_data" in state:
-                    for domain_name, data in state["domain_data"].items():
-                        if domain_name == domain or domain_name == f"{domain}:":  # Some domains end with ':'
-                            if "structures" in data:
-                                for template_key, template_data in data["structures"].items():
-                                    if isinstance(template_data, dict) and "url" in template_data:
-                                        domain_templates.append({
-                                            'template': template_key,
-                                            'url': template_data['url'],
-                                            'count': template_data.get('count', 1)
-                                        })
-                # Fallback to old format
-                elif "structures" in state:
-                    for template_key, template_data in state["structures"].items():
-                        if isinstance(template_data, dict) and "url" in template_data:
-                            domain_templates.append({
-                                'template': template_key,
-                                'url': template_data['url'],
-                                'count': template_data.get('count', 1)
-                            })
-            except Exception as e:
-                logger.exception(f"Error loading state file {latest_state}: {e}")
-
-        # Continue with existing priorities if state format not recognized
-        if not domain_templates:
-            # Priority 2: Look for template JSON files
-            json_files = list(domain_dir.glob("templates_*.json"))
-            if json_files:
-                latest_json = sorted(json_files)[-1]  # Get the most recent
-                logger.info(f"Using template JSON file: {latest_json}")
+            # Priorità 1: Cerca i file di stato del crawler
+            state_files = list(domain_dir.glob("crawler_state_*.pkl"))
+            if state_files:
+                latest_state = sorted(state_files)[-1]  # Ottieni il più recente
+                logger.info(f"Utilizzo file di stato: {latest_state}")
                 
                 try:
-                    with open(latest_json, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        if 'templates' in data:
-                            # Extract templates from standard format
-                            for template_key, template_data in data['templates'].items():
-                                if isinstance(template_data, dict) and 'url' in template_data and 'count' in template_data:
-                                    domain_templates.append({
-                                        'template': template_key,
-                                        'url': template_data['url'],
-                                        'count': template_data['count']
-                                    })
-                        elif 'domains' in data and domain in data['domains']:
-                            # Alternative format (consolidated report)
-                            for template_key, template_data in data['domains'][domain]['top_templates'].items():
-                                if isinstance(template_data, dict) and 'url' in template_data:
-                                    domain_templates.append({
-                                        'template': template_key,
-                                        'url': template_data['url'],
-                                        'count': template_data.get('count', 1)
-                                    })
+                    with open(latest_state, 'rb') as f:
+                        state = pickle.load(f)
+                    
+                    # Estrai i template dallo stato caricato
+                    domain_templates.extend(_extract_templates_from_state(state, domain))
                 except Exception as e:
-                    logger.exception(f"Error loading JSON file {latest_json}: {e}")
-        
-        # Priority 3: Look for templates in CSV files
+                    logger.exception(f"Errore caricando il file di stato {latest_state}: {e}")
+                    
+        # Se non abbiamo trovato template nei file di stato, continua con la ricerca tradizionale
         if not domain_templates:
-            csv_files = list(domain_dir.glob("templates_*.csv"))
-            if csv_files:
-                latest_csv = sorted(csv_files)[-1]  # Get the most recent
-                logger.info(f"Using CSV file: {latest_csv}")
+            if output_manager:
+                # Cerca file JSON dei template usando OutputManager
+                json_path = output_manager.find_latest_file("crawler", f"templates_{domain}_*.json")
+                if json_path:
+                    logger.info(f"Utilizzo file JSON: {json_path}")
+                    domain_templates.extend(_extract_templates_from_json(json_path, domain))
                 
-                try:
-                    df = pd.read_csv(latest_csv)
-                    if all(col in df.columns for col in ['template', 'example_url']):
-                        for _, row in df.iterrows():
-                            domain_templates.append({
-                                'template': row['template'],
-                                'url': row['example_url'],
-                                'count': row.get('count', 1)
-                            })
-                except Exception as e:
-                    logger.exception(f"Error loading CSV file {latest_csv}: {e}")
+                # Cerca file CSV dei template
+                csv_path = output_manager.find_latest_file("crawler", f"templates_{domain}_*.csv")
+                if csv_path and not domain_templates:
+                    logger.info(f"Utilizzo file CSV: {csv_path}")
+                    domain_templates.extend(_extract_templates_from_csv(csv_path))
+            else:
+                # Comportamento tradizionale - ricerca file nella directory del dominio
+                domain_dir = Path(output_dir) / domain
+                
+                # Priorità 2: Cerca file template JSON
+                json_files = list(domain_dir.glob("templates_*.json"))
+                if json_files:
+                    latest_json = sorted(json_files)[-1]  # Ottieni il più recente
+                    logger.info(f"Utilizzo file JSON: {latest_json}")
+                    domain_templates.extend(_extract_templates_from_json(latest_json, domain))
+                
+                # Priorità 3: Cerca template nei file CSV
+                if not domain_templates:
+                    csv_files = list(domain_dir.glob("templates_*.csv"))
+                    if csv_files:
+                        latest_csv = sorted(csv_files)[-1]  # Ottieni il più recente
+                        logger.info(f"Utilizzo file CSV: {latest_csv}")
+                        domain_templates.extend(_extract_templates_from_csv(latest_csv))
         
-        # Sort by count (most common templates first)
+        # Ordina per conteggio (template più comuni prima)
         domain_templates.sort(key=lambda x: x['count'], reverse=True)
         
-        # Limit number of templates if specified
+        # Limita il numero di template se specificato
         if max_templates_per_domain and len(domain_templates) > max_templates_per_domain:
-            logger.info(f"Limiting domain {domain} to {max_templates_per_domain} templates " +
-                        f"(from {len(domain_templates)})")
+            logger.info(f"Limitando il dominio {domain} a {max_templates_per_domain} template " +
+                        f"(da {len(domain_templates)})")
             domain_templates = domain_templates[:max_templates_per_domain]
         
-        # Extract only representative URLs
+        # Estrai solo gli URL rappresentativi
         domain_urls = [template['url'] for template in domain_templates]
-        logger.info(f"Found {len(domain_urls)} representative URLs for domain {domain} " +
-                    f"(one for each of {len(domain_templates)} templates)")
+        logger.info(f"Trovati {len(domain_urls)} URL rappresentativi per il dominio {domain} " +
+                    f"(uno per ciascuno dei {len(domain_templates)} template)")
         
-        # Add metadata for debugging
+        # Aggiungi metadati per debugging
         for i, (template, url) in enumerate(zip([t['template'] for t in domain_templates], domain_urls)):
             logger.debug(f"  {i+1}. Template: {template} -> URL: {url}")
         
         representative_urls.extend(domain_urls)
     
-    # Remove duplicates (in case one URL represents multiple templates)
+    # Rimuovi duplicati (nel caso in cui un URL rappresenti più template)
     unique_urls = list(dict.fromkeys(representative_urls))
     
-    # Use fallback if needed
+    # Usa fallback se necessario
     if not unique_urls and fallback_urls:
-        logger.info("No representative URLs found, using fallback.")
+        logger.info("Nessun URL rappresentativo trovato, utilizzo fallback.")
         unique_urls = fallback_urls
     
-    logger.info(f"Total: {len(unique_urls)} unique URLs to analyze (one per template)")
+    logger.info(f"Totale: {len(unique_urls)} URL unici da analizzare (uno per template)")
     return unique_urls
+
+def _extract_templates_from_state(state, domain):
+    """
+    Estrae le informazioni sui template da un file di stato del crawler.
+    Supporta sia il formato nuovo che quello vecchio del multi_domain_crawler.
+    
+    Args:
+        state: Stato del crawler caricato
+        domain: Dominio corrente
+        
+    Returns:
+        Lista di dizionari con informazioni sui template
+    """
+    templates = []
+    
+    # Gestisce il formato nuovo multi_domain_crawler
+    if "domain_data" in state:
+        for domain_name, data in state["domain_data"].items():
+            if domain_name == domain or domain_name == f"{domain}:":  # Alcuni domini terminano con ':'
+                if "structures" in data:
+                    for template_key, template_data in data["structures"].items():
+                        if isinstance(template_data, dict) and "url" in template_data:
+                            templates.append({
+                                'template': template_key,
+                                'url': template_data['url'],
+                                'count': template_data.get('count', 1)
+                            })
+    # Fallback al formato vecchio
+    elif "structures" in state:
+        for template_key, template_data in state["structures"].items():
+            if isinstance(template_data, dict) and "url" in template_data:
+                templates.append({
+                    'template': template_key,
+                    'url': template_data['url'],
+                    'count': template_data.get('count', 1)
+                })
+    
+    return templates
+
+def _extract_templates_from_csv(csv_path):
+    """
+    Estrae le informazioni sui template da un file CSV.
+    
+    Args:
+        csv_path: Percorso al file CSV
+        
+    Returns:
+        Lista di dizionari con informazioni sui template
+    """
+    templates = []
+    try:
+        df = pd.read_csv(csv_path)
+        if all(col in df.columns for col in ['template', 'example_url']):
+            for _, row in df.iterrows():
+                templates.append({
+                    'template': row['template'],
+                    'url': row['example_url'],
+                    'count': row.get('count', 1)
+                })
+    except Exception as e:
+        logger.exception(f"Errore caricando il file CSV {csv_path}: {e}")
+    
+    return templates
+
+def _extract_templates_from_json(json_path, domain):
+    """
+    Estrae le informazioni sui template da un file JSON.
+    
+    Args:
+        json_path: Percorso al file JSON
+        domain: Dominio corrente
+        
+    Returns:
+        Lista di dizionari con informazioni sui template
+    """
+    templates = []
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if 'templates' in data:
+                # Estrai template dal formato standard
+                for template_key, template_data in data['templates'].items():
+                    if isinstance(template_data, dict) and 'url' in template_data and 'count' in template_data:
+                        templates.append({
+                            'template': template_key,
+                            'url': template_data['url'],
+                            'count': template_data['count']
+                        })
+            elif 'domains' in data and domain in data['domains']:
+                # Formato alternativo (report consolidato)
+                for template_key, template_data in data['domains'][domain]['top_templates'].items():
+                    if isinstance(template_data, dict) and 'url' in template_data:
+                        templates.append({
+                            'template': template_key,
+                            'url': template_data['url'],
+                            'count': template_data.get('count', 1)
+                        })
+    except Exception as e:
+        logger.exception(f"Errore caricando il file JSON {json_path}: {e}")
+    
+    return templates
 
 class AxeAnalysis:
     def __init__(

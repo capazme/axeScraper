@@ -179,8 +179,7 @@ async def run_crawler(base_url: str, domain_config: Dict[str, Any], output_manag
     
     # Get standardized paths from output manager
     output_dir = str(output_manager.get_path("crawler"))
-    state_file = str(output_manager.get_path(
-        "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
+    state_file = str(output_manager.get_crawler_state_path())
     log_file = str(output_manager.get_timestamped_path(
         "logs", f"crawler_{output_manager.domain_slug}", "log"))
     
@@ -545,24 +544,31 @@ async def main():
     """Main pipeline entry point with clear execution flow."""
     global start_time, output_managers
     start_time = time.time()
+    
     # Debug percorsi
-    logger.info(f"PROJECT_ROOT: {os.path.abspath(os.path.dirname(__file__))}")
-    logger.info(f"CRAWLER_DIR: {os.path.abspath(os.path.join(os.path.dirname(__file__), "multi_domain_crawler"))}")
+    logger.info("PROJECT_ROOT: {}".format(os.path.abspath(os.path.dirname(__file__))))
+    logger.info("CRAWLER_DIR: {}".format(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "multi_domain_crawler"))
+    ))
     
     # Get all domains to process
     base_urls = config_manager.get_all_domains()
     
     logger.info("Starting accessibility testing pipeline")
     pipeline_config = config_manager.get_pipeline_config()
-    logger.info(f"Configuration: Start stage: {pipeline_config.get('start_stage', 'crawler')}, "
-               f"Repeat Axe: {pipeline_config.get('repeat_axe', 1)}")
+    logger.info("Configuration: Start stage: {}, Repeat Axe: {}".format(
+        pipeline_config.get('start_stage', 'crawler'),
+        pipeline_config.get('repeat_axe', 1)
+    ))
     
     # System information for troubleshooting
     cpu_count = os.cpu_count()
     memory = psutil.virtual_memory()
-    logger.info(f"System resources: {cpu_count} CPUs, "
-               f"{memory.total / (1024**3):.1f}GB total RAM, "
-               f"{memory.available / (1024**3):.1f}GB available RAM")
+    logger.info("System resources: {} CPUs, {:.1f}GB total RAM, {:.1f}GB available RAM".format(
+        cpu_count,
+        memory.total / (1024**3),
+        memory.available / (1024**3)
+    ))
     
     # Initialize output managers for all URLs
     output_managers = {}
@@ -610,7 +616,7 @@ async def main():
                 config={"root": existing_dir}
             )
         
-        output_managers[base_url] = output_manager
+        output_managers[base_url] = output_manager 
 
 if __name__ == "__main__":
     try:
