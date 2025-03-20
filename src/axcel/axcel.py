@@ -47,10 +47,18 @@ logger = get_logger("axe_analysis", config_manager.get_logging_config()["compone
 AUTO_SAVE_INTERVAL = config_manager.get_int("CRAWLER_SAVE_INTERVAL", 5)
 
 
+# In src/axcel/axcel.py
 def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[str]:
     """
     Loads URLs from the crawler state file (pickle).
     Supports both old and new formats from multi_domain_crawler.
+    
+    Args:
+        state_file: Path to crawler state pickle file
+        fallback_urls: URLs to use if state file can't be processed
+        
+    Returns:
+        List of URLs to analyze
     """
     path = Path(state_file)
     logger.info(f"Tentativo di caricamento URL da {state_file}")
@@ -67,7 +75,8 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
                 # The new format stores domain data in domain_data
                 for domain, data in state["domain_data"].items():
                     if "structures" in data and data["structures"]:
-                        urls.extend([data["structures"][t]["url"] for t in data["structures"]])
+                        urls.extend([data["structures"][t]["url"] for t in data["structures"] 
+                                    if "url" in data["structures"][t]])
                         logger.info(f"Loaded {len(urls)} URLs from templates in domain_data[{domain}]")
             
             # Check alternative formats in domain_data
@@ -75,13 +84,15 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
                 # Format where domain names end with colon
                 for domain, data in state.items():
                     if isinstance(data, dict) and "structures" in data and data["structures"]:
-                        domain_urls = [data["structures"][t]["url"] for t in data["structures"]]
+                        domain_urls = [data["structures"][t]["url"] for t in data["structures"] 
+                                       if "url" in data["structures"][t]]
                         urls.extend(domain_urls)
                         logger.info(f"Loaded {len(domain_urls)} URLs from domain {domain}")
                         
             # Fallback to old format
             elif "structures" in state and state["structures"]:
-                urls = [data["url"] for data in state["structures"].values()]
+                urls = [data["url"] for data in state["structures"].values() 
+                        if "url" in data]
                 logger.info(f"Loaded {len(urls)} unique URLs from file using the old format")
             elif "unique_pages" in state and state["unique_pages"]:
                 urls = list(state["unique_pages"])
@@ -98,23 +109,23 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
                 logger.warning("No URLs found in state file, using fallback")
                 urls = fallback_urls
                 
-            # Remove duplicates
-            urls = list(dict.fromkeys(urls))
+            # Remove duplicates and invalid URLs
+            urls = [url for url in list(dict.fromkeys(urls)) if url and isinstance(url, str)]
             logger.info(f"Successfully loaded {len(urls)} unique URLs from state file")
             return urls
             
         except Exception as e:
             logger.exception(f"Error loading state file {state_file}: {e}")
             try:
-                path.unlink()
-                logger.info(f"File {state_file} deleted due to corruption.")
+                # Don't delete the file - it might be needed for troubleshooting
+                logger.info(f"State file {state_file} could not be processed.")
             except Exception as unlink_e:
-                logger.exception(f"Error deleting file {state_file}: {unlink_e}")
+                logger.exception(f"Error handling file {state_file}: {unlink_e}")
             return fallback_urls if fallback_urls is not None else []
     else:
         logger.warning(f"State file {state_file} not found.")
         return fallback_urls if fallback_urls is not None else []
-    
+        
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=5),

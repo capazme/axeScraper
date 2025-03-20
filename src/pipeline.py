@@ -310,23 +310,26 @@ async def run_crawler(base_url: str, domain_config: Dict[str, Any], output_manag
         crawler_processes.pop(base_url, None)
         
 async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
-    """Run Axe analysis with standardized path management."""
+    """
+    Run Axe analysis with standardized path management and improved error handling.
+    
+    Args:
+        base_url: Target URL
+        domain_config: Domain configuration dictionary
+        output_manager: Output manager instance
+        
+    Returns:
+        True if analysis completed successfully
+    """
     logger.info(f"Starting Axe analysis for {base_url}")
     
     # Get axe configuration
     axe_config = domain_config.get("axe_config", {})
     
-    # Use the output manager to get the best path
+    # Use the output manager to get the crawler state path - more robust
     analysis_state_file = str(output_manager.get_crawler_state_path())
     
-    if not os.path.exists(analysis_state_file):
-        logger.warning(f"Crawler state file not found at primary path: {analysis_state_file}")
-        logger.info("Searching for alternate state files...")
-        
-        # Prova a cercare in posizioni alternative (gestite internamente da get_crawler_state_path)
-        analysis_state_file = str(output_manager.get_crawler_state_path())
-    
-    # Altre definizioni di percorso
+    # Define additional paths through output manager
     excel_filename = str(output_manager.get_path(
         "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
     visited_file = str(output_manager.get_path(
@@ -335,21 +338,21 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
     # Ensure directories exist
     output_manager.ensure_path_exists("axe")
     
-    # Verify dependencies
-    if not os.path.exists(analysis_state_file):
-        logger.error(f"Required crawler state file not found: {analysis_state_file}")
-        # Ancora una chance se il crawler è stato avviato senza registrare lo stato
-        fallback_urls = [base_url]
-        logger.warning(f"Using fallback URL: {base_url}")
+    # Set up fallback URLs and check for state file
+    fallback_urls = [base_url]
+    crawler_file_exists = os.path.exists(analysis_state_file)
+    
+    if not crawler_file_exists:
+        logger.warning(f"Crawler state file not found: {analysis_state_file}")
+        logger.info(f"Using fallback URL: {base_url}")
     else:
-        fallback_urls = [base_url]
-        logger.info(f"Using state file: {analysis_state_file}")
+        logger.info(f"Using crawler state file: {analysis_state_file}")
     
     try:
         # Create analyzer with standardized paths
         analyzer = AxeAnalysis(
             urls=None,
-            analysis_state_file=analysis_state_file,
+            analysis_state_file=analysis_state_file if crawler_file_exists else None,
             domains=axe_config.get("domains"),
             max_templates_per_domain=axe_config.get("max_templates_per_domain"),
             fallback_urls=fallback_urls,
@@ -376,8 +379,8 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
             
     except Exception as e:
         logger.exception(f"Error in Axe analysis: {e}")
-        return False
-    
+        return False   
+
 async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Generate final accessibility report with standardized path management."""
     logger.info(f"Generating final report for {base_url}")
@@ -459,44 +462,33 @@ async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_
         return None
 
 async def process_url(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
-    """Process a URL through the complete pipeline with explicit stage progression."""
+    """Process a URL through the complete pipeline with explicit stage progression and error handling."""
     logger.info(f"Processing {base_url} through the pipeline")
     
-    # Controlla se ci sono già dati in strutture diverse
-    domain_slug = output_manager.domain_slug
-    output_root = Path(output_manager.base_dir)
     # Get pipeline configuration
     pipeline_config = config_manager.get_pipeline_config()
     start_stage = pipeline_config.get("start_stage", "crawler")
     repeat_axe = pipeline_config.get("repeat_axe", 1)
     
-    # Verifica se ci sono directory esistenti con dati
-    alternate_path = None
-    for item in output_root.iterdir():
-        if item.is_dir() and domain_slug in item.name and item != output_manager.get_path("root"):
-            crawler_output = item / "crawler_output"
-            if crawler_output.exists():
-                for domain_dir in crawler_output.iterdir():
-                    if domain_dir.is_dir() and domain_slug in domain_dir.name:
-                        state_file = domain_dir / f"crawler_state_{domain_dir.name}.pkl"
-                        if state_file.exists():
-                            alternate_path = state_file
-                            logger.info(f"Trovato state file alternativo: {alternate_path}")
-                            break
-            if alternate_path:
-                break
+    # Log configuration for debugging
+    logger.info(f"Pipeline config: start_stage={start_stage}, repeat_axe={repeat_axe}")
+    logger.info(f"Using output_manager with base_dir={output_manager.base_dir}, domain={output_manager.domain}")
     
     # Run crawler if starting from that stage
     if start_stage == "crawler":
         logger.info(f"Starting with crawler stage for {base_url}")
-        crawler_success = await run_crawler(base_url, domain_config, output_manager)
-        
-        if not crawler_success:
-            logger.warning(f"Crawler stage failed for {base_url}, but continuing with pipeline")
+        try:
+            crawler_success = await run_crawler(base_url, domain_config, output_manager)
             
-        if shutdown_flag:
-            logger.warning(f"Shutdown requested after crawler stage for {base_url}")
-            return None
+            if not crawler_success:
+                logger.warning(f"Crawler stage failed for {base_url}, but continuing with pipeline")
+                
+            if shutdown_flag:
+                logger.warning(f"Shutdown requested after crawler stage for {base_url}")
+                return None
+        except Exception as e:
+            logger.exception(f"Unhandled error in crawler stage: {e}")
+            logger.warning(f"Continuing despite crawler error for {base_url}")
     else:
         logger.info(f"Skipping crawler stage for {base_url} (starting from {start_stage})")
     
@@ -504,33 +496,46 @@ async def process_url(base_url: str, domain_config: Dict[str, Any], output_manag
     if start_stage in ["crawler", "axe"]:
         logger.info(f"Running Axe analysis for {base_url} ({repeat_axe} iterations)")
         
+        axe_success = False
         for i in range(repeat_axe):
             logger.info(f"Axe analysis iteration {i+1}/{repeat_axe} for {base_url}")
-            axe_success = await run_axe_analysis(base_url, domain_config, output_manager)
-            
-            if not axe_success:
-                logger.warning(f"Axe analysis iteration {i+1} failed for {base_url}")
+            try:
+                iteration_success = await run_axe_analysis(base_url, domain_config, output_manager)
+                axe_success = axe_success or iteration_success
                 
-            if shutdown_flag:
-                logger.warning(f"Shutdown requested during Axe analysis for {base_url}")
-                return None
+                if not iteration_success:
+                    logger.warning(f"Axe analysis iteration {i+1} failed for {base_url}")
+                    
+                if shutdown_flag:
+                    logger.warning(f"Shutdown requested during Axe analysis for {base_url}")
+                    return None
+            except Exception as e:
+                logger.exception(f"Unhandled error in Axe analysis iteration {i+1}: {e}")
                 
             # Pause between iterations
             if i < repeat_axe - 1:
                 await asyncio.sleep(1)
+                
+        if not axe_success:
+            logger.error(f"All Axe analysis iterations failed for {base_url}")
+            logger.warning(f"Continuing to final report stage despite Axe failures")
     else:
         logger.info(f"Skipping Axe analysis stage for {base_url} (starting from {start_stage})")
     
     # Generate final report
     if not shutdown_flag:
         logger.info(f"Generating final report for {base_url}")
-        report_path = await run_final_report(base_url, domain_config, output_manager)
-        
-        if report_path:
-            logger.info(f"Final report generated for {base_url}: {report_path}")
-            return report_path
-        else:
-            logger.error(f"Failed to generate final report for {base_url}")
+        try:
+            report_path = await run_final_report(base_url, domain_config, output_manager)
+            
+            if report_path:
+                logger.info(f"Final report generated for {base_url}: {report_path}")
+                return report_path
+            else:
+                logger.error(f"Failed to generate final report for {base_url}")
+                return None
+        except Exception as e:
+            logger.exception(f"Unhandled error in final report stage: {e}")
             return None
     else:
         logger.warning(f"Shutdown requested before final report stage for {base_url}")

@@ -182,18 +182,19 @@ class OutputManager:
     def get_crawler_state_path(self, domain_suffix: Optional[str] = None) -> Path:
         """
         Ottiene il percorso del file di stato del crawler, controllando più posizioni possibili.
+        Implementa una ricerca gerarchica per trovare il file anche se si trova in posizioni alternative.
         
         Args:
             domain_suffix: Eventuale suffisso del dominio per il nome del file
             
         Returns:
-            Path al file di stato del crawler
+            Path al file di stato del crawler trovato o il percorso predefinito se non trovato
         """
         # Estrai il dominio di base dalla URL completa
         basic_domain = self.domain.replace("http://", "").replace("https://", "").replace("www.", "")
         basic_domain = basic_domain.split('/')[0]  # Solo la parte del dominio
         
-        # Lista di possibili percorsi da controllare in ordine
+        # Lista di possibili percorsi da controllare in ordine di priorità
         possible_paths = [
             # Formato standard per il file di stato
             self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl"),
@@ -207,17 +208,50 @@ class OutputManager:
             # Usando solo il dominio di base senza slug
             self.get_path("crawler", f"crawler_state_{basic_domain}.pkl"),
             
-            # Formato con dominio come slug
-            self.get_path("root") / "crawler_output" / f"crawler_state_{self.domain_slug}.pkl"
+            # Formato con dominio come slug nella directory principale
+            self.get_path("root") / "crawler_output" / f"crawler_state_{self.domain_slug}.pkl",
+            
+            # Vecchio formato nel percorso root
+            self.base_dir / f"crawler_state_{basic_domain}.pkl"
         ]
         
-        # Controlla ciascun percorso possibile
+        # Cerca in tutte le posizioni possibili, tornando il primo file trovato
         for path in possible_paths:
             if path.exists():
                 self.logger.info(f"Trovato file di stato crawler: {path}")
                 return path
-                
+        
+        # Cerca file che corrispondono a pattern simili in caso di varianti nel nome
+        crawler_dir = self.get_path("crawler")
+        if crawler_dir.exists():
+            for file in crawler_dir.glob("crawler_state_*.pkl"):
+                self.logger.info(f"Trovato file di stato crawler alternativo: {file}")
+                return file
+        
         # Se nessun file esiste, usa il path primario come default
         default_path = possible_paths[0]
         self.logger.warning(f"Nessun file di stato crawler trovato, verrà usato: {default_path}")
         return default_path
+
+    def get_axe_report_path(self) -> Path:
+        """
+        Ottiene il percorso del report di Axe, verificando possibili varianti.
+        
+        Returns:
+            Path al report di Axe esistente o percorso standard se non trovato
+        """
+        # Percorso standard
+        standard_path = self.get_path("axe", f"accessibility_report_{self.domain_slug}.xlsx")
+        
+        if standard_path.exists():
+            return standard_path
+        
+        # Cerca varianti del nome del file
+        axe_dir = self.get_path("axe")
+        if axe_dir.exists():
+            # Cerca qualsiasi report di accessibilità
+            for file in axe_dir.glob("accessibility_report_*.xlsx"):
+                return file
+        
+        # Restituisci il percorso standard anche se non esiste
+        return standard_path
