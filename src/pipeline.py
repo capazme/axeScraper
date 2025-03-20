@@ -240,8 +240,23 @@ async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_
     axe_config = domain_config.get("axe_config", {})
     
     # Get standardized paths
+    # In run_axe_analysis, modifica questo codice:
     analysis_state_file = str(output_manager.get_path(
         "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
+
+    # Controlla se esiste, altrimenti cerca nel percorso alternativo
+    if not os.path.exists(analysis_state_file):
+        # Estrai il dominio base
+        domain_base = base_url.replace("http://", "").replace("https://", "").replace("www.", "")
+        domain_base = domain_base.split('/')[0]  # Prendi solo la parte del dominio
+        
+        # Percorso alternativo con sottodirectory del dominio
+        alt_state_file = str(output_manager.get_path(
+            "crawler", f"{domain_base}/crawler_state_{domain_base}.pkl"))
+            
+        if os.path.exists(alt_state_file):
+            analysis_state_file = alt_state_file
+            logger.info(f"Usando percorso alternativo per state file: {analysis_state_file}")
     excel_filename = str(output_manager.get_path(
         "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
     visited_file = str(output_manager.get_path(

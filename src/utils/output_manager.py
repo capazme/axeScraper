@@ -175,3 +175,30 @@ class OutputManager:
             return None
             
         return max(matching_files, key=lambda p: p.stat().st_mtime)
+    
+    def get_crawler_state_path(self, domain_suffix: Optional[str] = None) -> Path:
+        """
+        Ottiene il percorso del file di stato del crawler, controllando più posizioni possibili.
+        
+        Args:
+            domain_suffix: Eventuale suffisso del dominio per il nome del file
+            
+        Returns:
+            Path al file di stato del crawler
+        """
+        # Estrai il dominio di base dalla URL completa
+        basic_domain = self.domain.replace("http://", "").replace("https://", "").replace("www.", "")
+        basic_domain = basic_domain.split('/')[0]  # Solo la parte del dominio
+        
+        # Controlla prima nel formato atteso dalla pipeline
+        primary_path = self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl")
+        if primary_path.exists():
+            return primary_path
+            
+        # Controlla nel formato usato dal multi_domain_crawler
+        alternate_path = self.get_path("crawler", f"{basic_domain}/crawler_state_{basic_domain}.pkl")
+        if alternate_path.exists():
+            return alternate_path
+            
+        # Usa il path primario come default
+        return primary_path
