@@ -1,26 +1,34 @@
+#!/usr/bin/env python3
+"""
+Enhanced Accessibility Analysis Module
+
+Processes data from accessibility tests, generates visualizations,
+and creates comprehensive reports with actionable recommendations.
+"""
+
+import os
+import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-import os
-import logging
-import datetime
+from datetime import datetime
 import pickle
-from urllib.parse import urlparse, urlunparse
+import re
 from pathlib import Path
-import argparse
+from urllib.parse import urlparse, urlunparse
 from typing import Dict, List, Tuple, Any, Optional
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-import re
 import json
 
-# Import the standardized logging and output management
+# Import configuration management
+from ..utils.config_manager import ConfigurationManager
 from ..utils.logging_config import get_logger
 from ..utils.output_manager import OutputManager
-from ..utils.config import LOGGING_CONFIG
 
-
+# Initialize configuration manager
+config_manager = ConfigurationManager(project_name="axeScraper")
 
 class AccessibilityAnalyzer:
     """
@@ -30,15 +38,21 @@ class AccessibilityAnalyzer:
     
     def __init__(self, log_level=None, max_workers=None, output_manager=None):
         """Initialize the analyzer with logging configuration and parallelism options."""
-        # Use standardized logging
+        # Use standardized logging from configuration manager
         self.logger = get_logger("report_analysis", 
-                             LOGGING_CONFIG.get("components", {}).get("report_analysis", {}))
+                           config_manager.get_logging_config()["components"]["report_analysis"])
         
         # Store output manager if provided
         self.output_manager = output_manager
         
+        # Get domain info from output manager if available
+        if output_manager:
+            self.domain_slug = output_manager.domain_slug
+        else:
+            self.domain_slug = "unknown_domain"
+        
         # Use configuration or defaults
-        self.max_workers = max_workers or 4
+        self.max_workers = max_workers or config_manager.get_int("REPORT_ANALYSIS_MAX_WORKERS", 4)
 
         
         # Define impact severity mapping for consistent scoring with extended weights
@@ -50,7 +64,7 @@ class AccessibilityAnalyzer:
             'unknown': 0
         }
             
-        # Mappa WCAG espansa e migliorata
+        # WCAG categories mapping
         self.wcag_categories = {
             'color-contrast': {'category': 'Perceivable', 'criterion': '1.4.3', 'name': 'Contrast (Minimum)'},
             'aria-roles': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
@@ -74,7 +88,7 @@ class AccessibilityAnalyzer:
             'empty-heading': {'category': 'Perceivable', 'criterion': '2.4.6', 'name': 'Headings and Labels'},
         }
         
-        # Soluzioni tecniche più dettagliate e utili
+        # Solutions for common issues
         self.solution_mapping = {
             'color-contrast': {
                 'description': 'Increase contrast ratio to at least 4.5:1 for normal text or 3:1 for large text',
@@ -128,7 +142,7 @@ class AccessibilityAnalyzer:
             },
         }
         
-        # Mapping per tipologie di pagina
+        # Page type pattern detection
         self.page_type_patterns = {
             'homepage': [r'/$', r'/index\.html$', r'/home$'],
             'search': [r'/search', r'/cerca', r'/find'],
@@ -144,34 +158,20 @@ class AccessibilityAnalyzer:
             'about': [r'/about', r'/chi-siamo', r'/azienda'],
         }
         
-        # Cache per migliorare le performance
+        # Cache for improving performance
         self._url_type_cache = {}
         self._normalized_url_cache = {}
         self._wcag_mapping_cache = {}
       
-    def _setup_logging(self, log_level):
-        """Set up logging with appropriate format and output locations."""
-        log_dir = Path("./logs")
-        log_dir.mkdir(exist_ok=True)
-        
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = log_dir / f'accessibility_analysis_{timestamp}.log'
-        
-        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        
-        handlers = [
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-        
-        logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
-        logger = logging.getLogger(__name__)
-        logger.info(f"Logging initialized. Log file: {log_file}")
-        return logger
-
     def normalize_url(self, url: str) -> str:
         """
-        Normalizza un URL (in minuscolo, senza frammenti) usando una cache per migliori prestazioni.
+        Normalize URL (lowercase, no fragments) using a cache for better performance.
+        
+        Args:
+            url: URL to normalize
+            
+        Returns:
+            Normalized URL
         """
         if not url or not isinstance(url, str):
             return ""
@@ -195,7 +195,13 @@ class AccessibilityAnalyzer:
             
     def get_page_type(self, url: str) -> str:
         """
-        Identifica il tipo di pagina basato su pattern predefiniti nell'URL.
+        Identify page type based on predefined patterns in the URL.
+        
+        Args:
+            url: URL to identify
+            
+        Returns:
+            Identified page type
         """
         if url in self._url_type_cache:
             return self._url_type_cache[url]
@@ -236,7 +242,13 @@ class AccessibilityAnalyzer:
     
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Pulisce e normalizza i dati.
+        Clean and normalize data.
+        
+        Args:
+            df: DataFrame to clean
+            
+        Returns:
+            Cleaned DataFrame
         """
         clean_df = df.copy()
         original_count = len(clean_df)
@@ -251,7 +263,7 @@ class AccessibilityAnalyzer:
         valid_impacts = list(self.impact_weights.keys())
         clean_df.loc[~clean_df['impact'].isin(valid_impacts), 'impact'] = 'unknown'
         clean_df = clean_df.drop_duplicates(subset=['normalized_url', 'violation_id'])
-        clean_df['analysis_date'] = datetime.datetime.now().strftime("%Y-%m-%d")
+        clean_df['analysis_date'] = datetime.now().strftime("%Y-%m-%d")
         clean_df['wcag_category'] = clean_df['violation_id'].apply(self._get_wcag_category)
         clean_df['wcag_criterion'] = clean_df['violation_id'].apply(self._get_wcag_criterion)
         clean_df['wcag_name'] = clean_df['violation_id'].apply(self._get_wcag_name)
@@ -260,20 +272,30 @@ class AccessibilityAnalyzer:
         return clean_df
         
     def _get_wcag_category(self, violation_id: str) -> str:
+        """Get WCAG category for a violation ID."""
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
         return self.wcag_categories[key]['category'] if key else "Other"
         
     def _get_wcag_criterion(self, violation_id: str) -> str:
+        """Get WCAG criterion for a violation ID."""
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
         return self.wcag_categories[key]['criterion'] if key else "N/A"
         
     def _get_wcag_name(self, violation_id: str) -> str:
+        """Get WCAG name for a violation ID."""
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
         return self.wcag_categories[key]['name'] if key else "Other"
     
     def _integrate_crawler_data(self, df: pd.DataFrame, crawler_state: str) -> pd.DataFrame:
         """
-        Integra i dati del crawler, ad es. template e profondità di pagina.
+        Integrate crawler data, e.g., templates and page depth.
+        
+        Args:
+            df: DataFrame to integrate with
+            crawler_state: Path to crawler state file
+            
+        Returns:
+            Integrated DataFrame
         """
         self.logger.info(f"Integrating crawler data from {crawler_state}")
         if not os.path.exists(crawler_state):
@@ -323,7 +345,13 @@ class AccessibilityAnalyzer:
     
     def calculate_metrics(self, df: pd.DataFrame) -> Dict:
         """
-        Calcola metriche di base sull’accessibilità.
+        Calculate basic accessibility metrics.
+        
+        Args:
+            df: DataFrame with accessibility data
+            
+        Returns:
+            Dictionary of metrics
         """
         if df.empty:
             self.logger.warning("Empty DataFrame, cannot calculate metrics")
@@ -411,7 +439,13 @@ class AccessibilityAnalyzer:
     
     def create_aggregations(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
-        Crea aggregazioni informative a partire dal DataFrame pulito.
+        Create informative aggregations from the cleaned DataFrame.
+        
+        Args:
+            df: Cleaned DataFrame
+            
+        Returns:
+            Dictionary of aggregation DataFrames
         """
         if df.empty:
             self.logger.warning("Empty DataFrame, cannot create aggregations")
@@ -420,7 +454,7 @@ class AccessibilityAnalyzer:
         
         aggregations = {}
         
-        # Aggregazione per impatto
+        # Aggregation by impact
         try:
             agg_impact = (df.groupby('impact')
                          .agg(Total_Violations=('violation_id', 'count'),
@@ -440,7 +474,7 @@ class AccessibilityAnalyzer:
             self.logger.error(f"Error creating impact aggregation: {e}")
             aggregations['By Impact'] = pd.DataFrame()
         
-        # Aggregazione per pagina
+        # Aggregation by page
         try:
             agg_page = df.groupby('normalized_url', as_index=False).agg(
                 Total_Violations=pd.NamedAgg(column='violation_id', aggfunc='count'),
@@ -498,7 +532,7 @@ class AccessibilityAnalyzer:
             self.logger.error(f"Error creating page aggregation: {e}")
             aggregations['By Page'] = pd.DataFrame()
         
-        # Aggregazione per tipo di violazione
+        # Aggregation by violation type
         try:
             agg_violation = (df.groupby('violation_id')
                             .agg(Total_Violations=('violation_id', 'count'),
@@ -539,7 +573,7 @@ class AccessibilityAnalyzer:
             self.logger.error(f"Error creating violation aggregation: {e}")
             aggregations['By Violation'] = pd.DataFrame()
         
-        # Problemi comuni per livello di impatto e tipo di pagina
+        # Common issues by impact level and page type
         try:
             impact_page_type_violations = []
             for impact in df['impact'].unique():
@@ -584,7 +618,7 @@ class AccessibilityAnalyzer:
             self.logger.error(f"Error creating common issues aggregation: {e}")
             aggregations['Common Issues'] = pd.DataFrame()
             
-        # Aggregazione per tipo di pagina
+        # Aggregation by page type
         try:
             page_type_agg = df.groupby('page_type').agg(
                 Total_Pages=pd.NamedAgg(column='normalized_url', aggfunc='nunique'),
@@ -617,7 +651,17 @@ class AccessibilityAnalyzer:
 
     def create_charts(self, metrics: Dict, aggregations: Dict[str, pd.DataFrame], 
                      data_df: pd.DataFrame) -> Dict[str, str]:
-        """Create charts using the output manager for consistent paths."""
+        """
+        Create charts using the output manager for consistent paths.
+        
+        Args:
+            metrics: Dictionary of metrics
+            aggregations: Dictionary of aggregation DataFrames
+            data_df: Source DataFrame
+            
+        Returns:
+            Dictionary mapping chart types to file paths
+        """
         # Get charts directory from output manager
         if self.output_manager:
             charts_dir = self.output_manager.get_path("charts")
@@ -629,7 +673,7 @@ class AccessibilityAnalyzer:
 
         chart_files = {}
         
-        # OTTIMIZZAZIONE: Palette di colori accessibile e migliorata
+        # Optimized color palette for accessibility
         colors = {
             'critical': '#E63946',
             'serious': '#F4A261',
@@ -656,7 +700,7 @@ class AccessibilityAnalyzer:
         plt.rcParams['xtick.labelsize'] = 10
         plt.rcParams['ytick.labelsize'] = 10
         
-        # 1. Grafico a ciambella per distribuzione per impatto
+        # 1. Donut chart for impact distribution
         if 'By Impact' in aggregations and not aggregations['By Impact'].empty:
             fig, ax = plt.subplots(figsize=(10, 7))
             
@@ -706,7 +750,7 @@ class AccessibilityAnalyzer:
             plt.close()
             chart_files['impact'] = str(chart_path)
         
-        # 2. Grafico a barre per pagine problematiche
+        # 2. Bar chart for problematic pages
         if 'By Page' in aggregations and not aggregations['By Page'].empty:
             fig, ax = plt.subplots(figsize=(12, 8))
             
@@ -768,7 +812,7 @@ class AccessibilityAnalyzer:
             plt.close()
             chart_files['top_pages'] = str(chart_path)
         
-        # 3. Grafico a barre per tipi di violazione con info WCAG
+        # 3. Bar chart for violation types with WCAG info
         if 'By Violation' in aggregations and not aggregations['By Violation'].empty:
             plt.figure(figsize=(12, 8))
             
@@ -827,7 +871,7 @@ class AccessibilityAnalyzer:
             plt.close()
             chart_files['violation_types'] = str(chart_path)
             
-        # 4. Grafico per categorizzazione WCAG
+        # 4. Chart for WCAG categorization
         if 'By Violation' in aggregations and not aggregations['By Violation'].empty:
             wcag_df = aggregations['By Violation'].copy()
             wcag_counts = wcag_df.groupby('WCAG_Category')[['Total_Violations']].sum().reset_index()
@@ -877,7 +921,7 @@ class AccessibilityAnalyzer:
             plt.close()
             chart_files['wcag_categories'] = str(chart_path)
             
-        # 5. Mappa di calore per tipo di pagina e impatto
+        # 5. Heat map for page type and impact
         if 'By Page Type' in aggregations and not aggregations['By Page Type'].empty and 'By Impact' in aggregations:
             try:
                 impact_df = aggregations['By Impact'].copy()
@@ -886,7 +930,7 @@ class AccessibilityAnalyzer:
                 pivot_data = []
                 for page_type in page_type_df['page_type']:
                     row_data = {'page_type': page_type}
-                    # Usa il DataFrame passato come parametro (data_df) per accedere alla colonna 'page_type'
+                    # Use the DataFrame passed as parameter (data_df) to access the 'page_type' column
                     page_subset = data_df[data_df['page_type'] == page_type]
                     
                     page_count = page_subset['normalized_url'].nunique()
@@ -927,7 +971,7 @@ class AccessibilityAnalyzer:
             except Exception as e:
                 self.logger.error(f"Error creating page type heatmap: {e}")
                 
-        # 6. Grafico per template
+        # 6. Chart for templates
         if 'template' in data_df.columns:
             try:
                 template_data = []
@@ -1004,7 +1048,7 @@ class AccessibilityAnalyzer:
     
     def load_template_data(self, pickle_file: str) -> Tuple[pd.DataFrame, Dict]:
         """
-        OTTIMIZZAZIONE: Miglioramento del caricamento dati template con struttura più robusta.
+        Optimized: Load template data with more robust structure.
         
         Args:
             pickle_file: Path to pickle file with template data
@@ -1051,79 +1095,32 @@ class AccessibilityAnalyzer:
             templates_df = pd.DataFrame(templates)
             
             if not templates_df.empty:
-                templates_df = templates_df.sort_values('Count', ascending=False)
+                templates_df = templates_df.sort_values('Count', reverse=True)
                 
             self.logger.info(f"Processed {len(templates_df)} templates")
             return templates_df, state
             
-        except Exception as e:
-            self.logger.error(f"Error loading template data: {e}")
-            raise
-    
-    def load_template_data(self, pickle_file: str) -> Tuple[pd.DataFrame, Dict]:
-        """
-        OTTIMIZZAZIONE: Miglioramento del caricamento dati template con struttura più robusta.
-        
-        Args:
-            pickle_file: Path to pickle file with template data
-            
-        Returns:
-            Tuple of (templates DataFrame, state dictionary)
-        """
-        self.logger.info(f"Loading template data from {pickle_file}")
-        if not os.path.exists(pickle_file):
-            raise FileNotFoundError(f"Template pickle file '{pickle_file}' not found")
-        try:
-            with open(pickle_file, "rb") as f:
-                state = pickle.load(f)
-            if "structures" not in state:
-                self.logger.warning("Pickle file doesn't contain expected 'structures' key")
-                state["structures"] = {}
-            structures = state.get("structures", {})
-            self.logger.info(f"Loaded {len(structures)} template structures")
-            templates = []
-            for template, data in structures.items():
-                rep_url = data.get('url', '')
-                template_urls = data.get('urls', [])
-                if not template_urls and 'url_list' in data:
-                    template_urls = data.get('url_list', [])
-                if not template_urls and rep_url:
-                    template_urls = [rep_url]
-                templates.append({
-                    'Template': template,
-                    'Representative URL': rep_url,
-                    'Normalized Rep URL': self.normalize_url(rep_url),
-                    'Count': data.get('count', len(template_urls) if template_urls else 0),
-                    'Template Pages': template_urls,
-                    'Template Depth': data.get('depth', 0)
-                })
-            templates_df = pd.DataFrame(templates)
-            if not templates_df.empty:
-                templates_df = templates_df.sort_values('Count', ascending=False)
-            self.logger.info(f"Processed {len(templates_df)} templates")
-            return templates_df, state
         except Exception as e:
             self.logger.error(f"Error loading template data: {e}")
             raise
     
     def _analyze_single_template(self, row, axe_df, analyzed_urls) -> Dict:
         """
-        Analizza un template sul campione rappresentativo (una pagina per template) e
-        calcola la proiezione del numero totale di violazioni sul sito moltiplicando per
-        il numero di occorrenze.
+        Analyze a template on a representative sample (one page per template) and
+        calculate projected violations across the site by multiplying by occurrences.
         
         Args:
-            row: una riga del DataFrame dei template
-            axe_df: DataFrame con i dati di accessibilità
-            analyzed_urls: Set di URL analizzati
+            row: A row from the templates DataFrame
+            axe_df: DataFrame with accessibility data
+            analyzed_urls: Set of analyzed URLs
         
         Returns:
-            Dizionario con i dati di analisi per il template
+            Dictionary with analysis data for the template
         """
         template_name = row['Template']
         rep_url = row['Representative URL']
         norm_rep_url = row['Normalized Rep URL']
-        occurrence = row['Count']  # Numero di pagine per questo template
+        occurrence = row['Count']  # Number of pages for this template
         rep_violations = axe_df[axe_df['normalized_url'] == norm_rep_url]
         sample_violation_count = len(rep_violations)
         impact_counts = rep_violations['impact'].value_counts().to_dict()
@@ -1165,16 +1162,15 @@ class AccessibilityAnalyzer:
 
     def analyze_templates(self, templates_df: pd.DataFrame, axe_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Analizza i template basandosi su una pagina rappresentativa per template e proietta
-        il numero totale di violazioni sull'intero sito moltiplicando per il numero di occorrenze.
-        Questa funzione evidenzia sia l'analisi sul campione che la sua proiezione.
+        Analyze templates based on a representative page per template and project
+        total violations across the entire site by multiplying by occurrences.
         
         Args:
-            templates_df: DataFrame con i dati dei template
-            axe_df: DataFrame con i dati di accessibilità
+            templates_df: DataFrame with template data
+            axe_df: DataFrame with accessibility data
             
         Returns:
-            DataFrame con l'analisi dei template, inclusi i conteggi sul campione e le proiezioni
+            DataFrame with template analysis
         """
         self.logger.info("Analyzing templates and projecting violations based on representative sample")
         if templates_df.empty or axe_df.empty:
@@ -1211,7 +1207,20 @@ class AccessibilityAnalyzer:
                             aggregations: Dict[str, pd.DataFrame], chart_files: Dict[str, str],
                             template_df: Optional[pd.DataFrame] = None, 
                             output_excel: Optional[str] = None) -> str:
-        """Generate a comprehensive Excel report with improved presentation."""
+        """
+        Generate a comprehensive Excel report with improved presentation.
+        
+        Args:
+            axe_df: DataFrame with accessibility data
+            metrics: Dictionary of metrics
+            aggregations: Dictionary of aggregation DataFrames
+            chart_files: Dictionary of chart file paths
+            template_df: DataFrame with template analysis
+            output_excel: Path to output Excel file
+            
+        Returns:
+            Path to generated Excel file
+        """
         # If using OutputManager
         if hasattr(self, 'output_manager') and self.output_manager:
             if output_excel is None:
@@ -1231,7 +1240,7 @@ class AccessibilityAnalyzer:
         for name, df in aggregations.items():
             self.logger.info(f"Aggregation '{name}' has {len(df)} rows and columns: {list(df.columns)}")
         
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d")
+        timestamp = datetime.now().strftime("%Y-%m-%d")
         
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
             workbook = writer.book
@@ -1769,6 +1778,8 @@ def main():
     """
     Main function to run the accessibility analysis tool from command line.
     """
+    import argparse
+    
     parser = argparse.ArgumentParser(description='Optimized Accessibility Analysis Tool')
     parser.add_argument('--domain', '-d', required=True, help='Domain being analyzed')
     parser.add_argument('--input', '-i', help='Excel file with axe data')
@@ -1779,13 +1790,38 @@ def main():
     args = parser.parse_args()
     
     try:
-        analyzer = AccessibilityAnalyzer(
+        # Initialize configuration manager for paths
+        config = ConfigurationManager()
+        domain_config = config.load_domain_config(args.domain)
+        
+        # Create output manager
+        output_root = config.get_path("OUTPUT_DIR", "~/axeScraper/output")
+        output_manager = OutputManager(
+            base_dir=output_root,
             domain=args.domain,
-            log_level="DEBUG" if args.verbose else "INFO",
-            max_workers=args.workers
+            create_dirs=True
         )
         
-        report_path = analyzer.run_analysis(args.input, args.crawler)
+        # Create analyzer
+        analyzer = AccessibilityAnalyzer(
+            max_workers=args.workers,
+            output_manager=output_manager
+        )
+        
+        # Get standardized paths if not provided
+        input_excel = args.input
+        crawler_state = args.crawler
+        
+        if not input_excel:
+            input_excel = str(output_manager.get_path(
+                "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
+                
+        if not crawler_state:
+            crawler_state = str(output_manager.get_path(
+                "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
+        
+        # Run analysis
+        report_path = analyzer.run_analysis(input_excel, crawler_state)
         print(f"Analysis complete. Report saved to: {report_path}")
         return 0
         
@@ -1796,4 +1832,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
- 

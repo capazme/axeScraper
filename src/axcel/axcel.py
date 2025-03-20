@@ -2,11 +2,11 @@
 """
 AxeAnalysis
 
-Analizza un insieme di URL utilizzando axe-core (tramite Selenium) e genera un report Excel,
-con uno sheet per ogni URL analizzato. I progressi vengono salvati periodicamente su file
-in modo da poter riprendere l'analisi in caso di interruzione.
+Analyzes a set of URLs using axe-core (via Selenium) and generates an Excel report,
+with one sheet per analyzed URL. Progress is saved periodically to allow resuming
+in case of interruption.
 
-Compatibile con output di multi_domain_crawler.
+Compatible with output from multi_domain_crawler.
 """
 
 import asyncio
@@ -31,16 +31,25 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from .excel_report import rename_headers
-from ..utils.config import LOGGING_CONFIG
-from ..utils.output_manager import OutputManager
-from ..utils.logging_config import get_logger
 
-AUTO_SAVE_INTERVAL = 5  # Salva lo stato ogni 5 URL processati
+# Import configuration management
+from ..utils.config_manager import ConfigurationManager
+from ..utils.logging_config import get_logger
+from ..utils.output_manager import OutputManager
+
+# Initialize configuration manager
+config_manager = ConfigurationManager(project_name="axeScraper")
+
+# Set up logger with axe-specific configuration
+logger = get_logger("axe_analysis", config_manager.get_logging_config()["components"]["axe_analysis"])
+
+# Auto-save interval
+AUTO_SAVE_INTERVAL = config_manager.get_int("CRAWLER_SAVE_INTERVAL", 5)
 
 def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[str]:
     """
-    Carica gli URL dal file di stato del crawler (pickle).
-    Supporta sia il vecchio formato che il nuovo formato del multi_domain_crawler.
+    Loads URLs from the crawler state file (pickle).
+    Supports both old and new formats from multi_domain_crawler.
     """
     path = Path(state_file)
     if path.exists():
@@ -50,40 +59,40 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
             
             urls = []
             
-            # Prova il nuovo formato di multi_domain_crawler
+            # Try the new multi_domain_crawler format
             if "domain_data" in state:
-                # Il nuovo formato memorizza i dati per dominio in domain_data
+                # The new format stores domain data in domain_data
                 for domain, data in state["domain_data"].items():
                     if "structures" in data and data["structures"]:
                         urls.extend([data["structures"][t]["url"] for t in data["structures"]])
-                        logging.info(f"Caricati {len(urls)} URL da templates in domain_data[{domain}]")
+                        logger.info(f"Loaded {len(urls)} URLs from templates in domain_data[{domain}]")
                         
-            # Fallback al vecchio formato
+            # Fallback to old format
             elif "structures" in state and state["structures"]:
                 urls = [data["url"] for data in state["structures"].values()]
-                logging.info(f"Caricati {len(urls)} URL univoci dal file usando il vecchio formato")
+                logger.info(f"Loaded {len(urls)} unique URLs from file using the old format")
             elif "unique_pages" in state and state["unique_pages"]:
                 urls = list(state["unique_pages"])
-                logging.info(f"Caricati {len(urls)} URL univoci dal file usando unique_pages")
+                logger.info(f"Loaded {len(urls)} unique URLs from file using unique_pages")
             else:
                 urls = list(state.get("visited", []))
-                logging.info(f"Caricati {len(urls)} URL (tutti) dal file")
+                logger.info(f"Loaded {len(urls)} URLs (all) from file")
             
-            # Se non troviamo URL, usa fallback
+            # If no URLs found, use fallback
             if not urls and fallback_urls is not None:
-                logging.info("Nessun URL trovato, uso fallback.")
+                logger.info("No URLs found, using fallback.")
                 urls = fallback_urls
             return urls
         except Exception as e:
-            logging.exception(f"Errore nel caricamento del file di stato {state_file}: {e}")
+            logger.exception(f"Error loading state file {state_file}: {e}")
             try:
                 path.unlink()
-                logging.info(f"File {state_file} eliminato per corruzione.")
+                logger.info(f"File {state_file} deleted due to corruption.")
             except Exception as unlink_e:
-                logging.exception(f"Errore nell'eliminazione del file {state_file}: {unlink_e}")
+                logger.exception(f"Error deleting file {state_file}: {unlink_e}")
             return fallback_urls if fallback_urls is not None else []
     else:
-        logging.warning(f"File di stato {state_file} non trovato.")
+        logger.warning(f"State file {state_file} not found.")
         return fallback_urls if fallback_urls is not None else []
 
 @retry(
@@ -91,56 +100,55 @@ def load_urls_from_crawler_state(state_file: str, fallback_urls=None) -> list[st
     wait=wait_exponential(multiplier=1, min=1, max=5),
     retry=retry_if_exception_type((TimeoutException, WebDriverException))
 )
-
 def robust_driver_get(driver, url):
-    """Carica la pagina con driver.get(url) con retry in caso di errori."""
+    """Load page with driver.get(url) with retry for errors."""
     driver.get(url)
 
 def safe_pickle_dump(data, filename):
-    """Salva i dati in modo sicuro su file."""
+    """Save data safely to file."""
     tmpfile = filename + ".tmp"
     with open(tmpfile, "wb") as f:
         pickle.dump(data, f)
     os.replace(tmpfile, filename)
-    logging.debug(f"Stato salvato su '{tmpfile}' e sostituito in '{filename}'.")
+    logger.debug(f"State saved to '{tmpfile}' and replaced in '{filename}'.")
 
 def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templates_per_domain=None, fallback_urls=None) -> list[str]:
     """
-    Carica UN URL rappresentativo per ogni template dal crawler multi-dominio.
+    Load one representative URL for each template from the multi-domain crawler.
     
-    Supporta il nuovo formato del multi_domain_crawler che utilizza una struttura diversa
-    per memorizzare i template e le relative informazioni.
+    Supports the new multi_domain_crawler format with a different structure
+    for storing templates and their information.
     """
     representative_urls = []
     output_path = Path(output_dir)
     
-    # Se è specificata una lista di domini, usa solo quelli
+    # If specific domains are provided, use only those
     if domains:
         domain_list = [d.strip() for d in domains.split(',')] if isinstance(domains, str) else domains
     else:
-        # Altrimenti cerca tutte le cartelle di dominio nell'output_dir
+        # Otherwise look for all domain folders in output_dir
         domain_list = [d.name for d in output_path.glob("*") if d.is_dir() and not d.name.startswith('.')]
     
-    logging.info(f"Cercando URL rappresentativi per i domini: {domain_list}")
+    logger.info(f"Looking for representative URLs for domains: {domain_list}")
     
     for domain in domain_list:
         domain_templates = []
         domain_dir = output_path / domain
         
-        # Priorità 1: Cerca file di stato del crawler (per il nuovo formato multi_domain_crawler)
+        # Priority 1: Look for crawler state files (for new multi_domain_crawler format)
         state_files = list(domain_dir.glob("crawler_state_*.pkl"))
         if state_files:
-            latest_state = sorted(state_files)[-1]  # Prendi il più recente
-            logging.info(f"Usando il file di stato del crawler: {latest_state}")
+            latest_state = sorted(state_files)[-1]  # Get the most recent
+            logger.info(f"Using crawler state file: {latest_state}")
             
             try:
                 with open(latest_state, 'rb') as f:
                     state = pickle.load(f)
                 
-                # Gestisce il nuovo formato di multi_domain_crawler
+                # Handle new multi_domain_crawler format
                 if "domain_data" in state:
                     for domain_name, data in state["domain_data"].items():
-                        if domain_name == domain or domain_name == f"{domain}:":  # Alcuni domini finiscono con ':'
+                        if domain_name == domain or domain_name == f"{domain}:":  # Some domains end with ':'
                             if "structures" in data:
                                 for template_key, template_data in data["structures"].items():
                                     if isinstance(template_data, dict) and "url" in template_data:
@@ -149,7 +157,7 @@ def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templa
                                             'url': template_data['url'],
                                             'count': template_data.get('count', 1)
                                         })
-                # Fallback al vecchio formato
+                # Fallback to old format
                 elif "structures" in state:
                     for template_key, template_data in state["structures"].items():
                         if isinstance(template_data, dict) and "url" in template_data:
@@ -159,21 +167,21 @@ def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templa
                                 'count': template_data.get('count', 1)
                             })
             except Exception as e:
-                logging.exception(f"Errore nel caricamento del file di stato {latest_state}: {e}")
+                logger.exception(f"Error loading state file {latest_state}: {e}")
 
-        # Continua con le priorità esistenti se il formato di stato non è riconosciuto
+        # Continue with existing priorities if state format not recognized
         if not domain_templates:
-            # Priorità 2: Cerca file JSON di template
+            # Priority 2: Look for template JSON files
             json_files = list(domain_dir.glob("templates_*.json"))
             if json_files:
-                latest_json = sorted(json_files)[-1]  # Prendi il più recente
-                logging.info(f"Usando il file template JSON: {latest_json}")
+                latest_json = sorted(json_files)[-1]  # Get the most recent
+                logger.info(f"Using template JSON file: {latest_json}")
                 
                 try:
                     with open(latest_json, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         if 'templates' in data:
-                            # Estrai template dal formato standard
+                            # Extract templates from standard format
                             for template_key, template_data in data['templates'].items():
                                 if isinstance(template_data, dict) and 'url' in template_data and 'count' in template_data:
                                     domain_templates.append({
@@ -182,7 +190,7 @@ def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templa
                                         'count': template_data['count']
                                     })
                         elif 'domains' in data and domain in data['domains']:
-                            # Formato alternativo (consolidated report)
+                            # Alternative format (consolidated report)
                             for template_key, template_data in data['domains'][domain]['top_templates'].items():
                                 if isinstance(template_data, dict) and 'url' in template_data:
                                     domain_templates.append({
@@ -191,14 +199,14 @@ def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templa
                                         'count': template_data.get('count', 1)
                                     })
                 except Exception as e:
-                    logging.exception(f"Errore nel caricamento del file JSON {latest_json}: {e}")
+                    logger.exception(f"Error loading JSON file {latest_json}: {e}")
         
-        # Priorità 3: Cercare template nei file CSV
+        # Priority 3: Look for templates in CSV files
         if not domain_templates:
             csv_files = list(domain_dir.glob("templates_*.csv"))
             if csv_files:
-                latest_csv = sorted(csv_files)[-1]  # Prendi il più recente
-                logging.info(f"Usando il file CSV: {latest_csv}")
+                latest_csv = sorted(csv_files)[-1]  # Get the most recent
+                logger.info(f"Using CSV file: {latest_csv}")
                 
                 try:
                     df = pd.read_csv(latest_csv)
@@ -210,39 +218,38 @@ def load_urls_from_multi_domain_output(output_dir: str, domains=None, max_templa
                                 'count': row.get('count', 1)
                             })
                 except Exception as e:
-                    logging.exception(f"Errore nel caricamento del file CSV {latest_csv}: {e}")
+                    logger.exception(f"Error loading CSV file {latest_csv}: {e}")
         
-        # Ordina per conteggio (i template più comuni prima)
+        # Sort by count (most common templates first)
         domain_templates.sort(key=lambda x: x['count'], reverse=True)
         
-        # Limita il numero di template se specificato
+        # Limit number of templates if specified
         if max_templates_per_domain and len(domain_templates) > max_templates_per_domain:
-            logging.info(f"Limitando il dominio {domain} a {max_templates_per_domain} template " +
-                        f"(da {len(domain_templates)})")
+            logger.info(f"Limiting domain {domain} to {max_templates_per_domain} templates " +
+                        f"(from {len(domain_templates)})")
             domain_templates = domain_templates[:max_templates_per_domain]
         
-        # Estrai solo gli URL rappresentativi
+        # Extract only representative URLs
         domain_urls = [template['url'] for template in domain_templates]
-        logging.info(f"Trovati {len(domain_urls)} URL rappresentativi per il dominio {domain} " +
-                    f"(uno per ciascuno dei {len(domain_templates)} template)")
+        logger.info(f"Found {len(domain_urls)} representative URLs for domain {domain} " +
+                    f"(one for each of {len(domain_templates)} templates)")
         
-        # Aggiungi metadati per debug
+        # Add metadata for debugging
         for i, (template, url) in enumerate(zip([t['template'] for t in domain_templates], domain_urls)):
-            logging.debug(f"  {i+1}. Template: {template} -> URL: {url}")
+            logger.debug(f"  {i+1}. Template: {template} -> URL: {url}")
         
         representative_urls.extend(domain_urls)
     
-    # Rimuovi duplicati (in caso uno stesso URL rappresenti più template)
+    # Remove duplicates (in case one URL represents multiple templates)
     unique_urls = list(dict.fromkeys(representative_urls))
     
-    # Usa fallback se necessario
+    # Use fallback if needed
     if not unique_urls and fallback_urls:
-        logging.info("Nessun URL rappresentativo trovato, uso fallback.")
+        logger.info("No representative URLs found, using fallback.")
         unique_urls = fallback_urls
     
-    logging.info(f"Totale: {len(unique_urls)} URL unici da analizzare (uno per template)")
+    logger.info(f"Total: {len(unique_urls)} unique URLs to analyze (one per template)")
     return unique_urls
-
 
 class AxeAnalysis:
     def __init__(
@@ -253,24 +260,29 @@ class AxeAnalysis:
         domains: str = None,
         max_templates_per_domain: int = None,
         fallback_urls: list[str] = None,
-        pool_size: int = 10,
-        sleep_time: float = 1.0,
+        pool_size: int = None,
+        sleep_time: float = None,
         excel_filename: str = None,
         visited_file: str = None,
-        headless: bool = True,
-        resume: bool = True,
+        headless: bool = None,
+        resume: bool = None,
         output_folder: str = None,
         output_manager = None
     ) -> None:
         """
         Initialize the accessibility analysis on representative URLs for templates.
         """
-        # Set up logger with component-specific config
-        self.logger = get_logger("axe_analysis", 
-                             LOGGING_CONFIG.get("components", {}).get("axe_analysis", {}))
-        
         # Use output manager if provided
         self.output_manager = output_manager
+        
+        # Use configuration manager for defaults
+        self.config = config_manager.get_nested("axe_config", {})
+        
+        # Override with instance-specific values if provided
+        self.pool_size = pool_size if pool_size is not None else self.config.get("pool_size", 5)
+        self.sleep_time = sleep_time if sleep_time is not None else self.config.get("sleep_time", 1.0)
+        self.headless = headless if headless is not None else self.config.get("headless", True)
+        self.resume = resume if resume is not None else self.config.get("resume", True)
         
         # First look for URLs from the multi-domain crawler (one URL per template)
         if urls is None and crawler_output_dir:
@@ -287,7 +299,7 @@ class AxeAnalysis:
             urls = fallback_urls or []
             
         self.all_urls = set(urls)
-        self.logger.info(f"{len(self.all_urls)} representative URLs will be analyzed.")
+        logger.info(f"{len(self.all_urls)} representative URLs will be analyzed.")
 
         # Determine paths from output manager if available
         if self.output_manager:
@@ -296,83 +308,101 @@ class AxeAnalysis:
                 "axe", f"accessibility_report_{self.output_manager.domain_slug}.xlsx")
             self.output_folder = str(self.output_manager.get_path("axe"))
         else:
-            # Use provided paths
-            self.visited_file = Path(visited_file or "visited_urls.txt")
-            self.excel_filename = excel_filename or "accessibility_report.xlsx"
-            self.output_folder = output_folder or "output_axe"
+            # Use provided paths or defaults from config
+            domain_slug = self.config.get("domain_slug", "unknown")
+            self.visited_file = Path(visited_file or self.config.get("visited_file", f"visited_urls_{domain_slug}.txt"))
+            self.excel_filename = excel_filename or self.config.get("excel_filename", f"accessibility_report_{domain_slug}.xlsx")
+            self.output_folder = output_folder or self.config.get("output_folder", "output_axe")
             
             # Create output directory if needed
             Path(self.output_folder).mkdir(parents=True, exist_ok=True)
 
         self.visited: set[str] = set()
-        if resume:
+        if self.resume:
             self._load_visited()
         else:
-            self.logger.info("Resume mode disabled: ignoring visited state.")
+            logger.info("Resume mode disabled: ignoring visited state.")
 
         self.pending_urls = list(self.all_urls - self.visited)
-        self.logger.info(f"{len(self.pending_urls)} pending URLs to process.")
-
-        self.pool_size = pool_size
-        self.sleep_time = sleep_time
-        self.headless = headless
+        logger.info(f"{len(self.pending_urls)} pending URLs to process.")
 
         self.results: dict[str, list[dict]] = {}
         self.processed_count = 0
 
     def _load_visited(self) -> None:
-        """Carica gli URL già processati dal file visited."""
-        if self.visited_file.exists():
+        """Load already processed URLs from the visited file."""
+        if isinstance(self.visited_file, str):
+            visited_path = Path(self.visited_file)
+        else:
+            visited_path = self.visited_file
+            
+        if visited_path.exists():
             try:
-                with self.visited_file.open("r", encoding="utf-8") as f:
+                with visited_path.open("r", encoding="utf-8") as f:
                     for line in f:
                         url = line.strip()
                         if url:
                             self.visited.add(url)
-                self.logger.info(f"Caricati {len(self.visited)} URL dal file '{self.visited_file}'.")
+                logger.info(f"Loaded {len(self.visited)} URLs from file '{visited_path}'.")
             except Exception as e:
-                self.logger.exception(f"Errore nel caricamento del file visited: {e}")
+                logger.exception(f"Error loading visited file: {e}")
         else:
-            self.logger.debug(f"Nessun file visited trovato in '{self.visited_file}'.")
+            logger.debug(f"No visited file found at '{visited_path}'.")
 
     def _save_visited(self) -> None:
-        """Salva gli URL processati su file."""
+        """Save processed URLs to file."""
         try:
-            with self.visited_file.open("w", encoding="utf-8") as f:
+            if isinstance(self.visited_file, str):
+                visited_path = Path(self.visited_file)
+            else:
+                visited_path = self.visited_file
+                
+            # Ensure parent directory exists
+            visited_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with visited_path.open("w", encoding="utf-8") as f:
                 for url in sorted(self.visited):
                     f.write(url + "\n")
-            self.logger.info(f"Salvati {len(self.visited)} URL in '{self.visited_file}'.")
+            logger.info(f"Saved {len(self.visited)} URLs in '{visited_path}'.")
         except Exception as e:
-            self.logger.exception(f"Errore nel salvataggio del file visited: {e}")
+            logger.exception(f"Error saving visited file: {e}")
 
     def _create_driver(self) -> webdriver.Chrome:
-        """Crea un nuovo WebDriver Chrome."""
+        """Create a new Chrome WebDriver."""
         options = ChromeOptions()
+        
+        # Set headless mode based on configuration
         if self.headless:
             options.add_argument("--headless")
+            
+        # Additional Chrome options for robustness
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--incognito")
+        options.add_argument("--disable-dev-shm-usage")
+        
+        # Create temporary profile
         temp_profile = tempfile.mkdtemp()
         options.add_argument(f"--user-data-dir={temp_profile}")
+        
         driver = webdriver.Chrome(options=options)
         driver.implicitly_wait(5)
         driver.set_page_load_timeout(30)
-        self.logger.debug("WebDriver creato.")
+        logger.debug("WebDriver created.")
         return driver
 
     async def _init_driver_pool(self) -> asyncio.Queue:
-        """Crea un pool di WebDriver e li inserisce in una coda asincrona."""
+        """Create a pool of WebDrivers and put them in an async queue."""
         pool = asyncio.Queue()
         for _ in range(self.pool_size):
             driver = await asyncio.to_thread(self._create_driver)
             await pool.put(driver)
-        self.logger.info(f"Pool di {self.pool_size} WebDriver creato.")
+        logger.info(f"Pool of {self.pool_size} WebDrivers created.")
         return pool
 
     async def process_url(self, url: str, driver_pool: asyncio.Queue) -> None:
-        """Processa un singolo URL utilizzando un WebDriver dal pool."""
-        self.logger.info(f"Inizio analisi: {url}")
+        """Process a single URL using a WebDriver from the pool."""
+        logger.info(f"Starting analysis: {url}")
         driver = await driver_pool.get()
         try:
             await asyncio.to_thread(robust_driver_get, driver, url)
@@ -384,7 +414,7 @@ class AxeAnalysis:
                     results = await asyncio.to_thread(axe.run)
                     break
                 except Exception as e:
-                    self.logger.exception(f"Errore con axe su {url}, tentativo {attempt}: {e}")
+                    logger.exception(f"Error with axe on {url}, attempt {attempt}: {e}")
                     if attempt == 3:
                         results = {"violations": []}
                     else:
@@ -404,70 +434,77 @@ class AxeAnalysis:
                     }
                     issues.append(issue)
             self.results[url] = issues
-            self.logger.info(f"{url}: {len(issues)} issues trovate.")
+            logger.info(f"{url}: {len(issues)} issues found.")
             self.visited.add(url)
             self.processed_count += 1
             if self.processed_count % AUTO_SAVE_INTERVAL == 0:
                 self._save_visited()
         except Exception as e:
-            self.logger.exception(f"Errore durante il processing di {url}: {e}")
+            logger.exception(f"Error processing {url}: {e}")
         finally:
-            # Rilascia il driver nel pool per il riutilizzo
+            # Release the driver back to the pool for reuse
             await driver_pool.put(driver)
 
     async def run(self) -> None:
-        """Processa tutti gli URL pendenti usando il pool di driver."""
+        """Process all pending URLs using the driver pool."""
         if not self.pending_urls:
-            self.logger.warning("Nessun URL da analizzare!")
+            logger.warning("No URLs to analyze!")
             return
             
         driver_pool = await self._init_driver_pool()
         tasks = [asyncio.create_task(self.process_url(url, driver_pool))
                  for url in self.pending_urls]
-        self.logger.info(f"Avvio di {len(tasks)} task di analisi...")
+        logger.info(f"Starting {len(tasks)} analysis tasks...")
         await asyncio.gather(*tasks, return_exceptions=True)
         self._save_visited()
-        # Chiudi tutti i driver nel pool
+        # Close all drivers in the pool
         while not driver_pool.empty():
             driver = await driver_pool.get()
             await asyncio.to_thread(driver.quit)
-        self.logger.info("Tutti i driver del pool sono stati chiusi.")
+        logger.info("All pool drivers have been closed.")
 
     def generate_excel_report(self) -> None:
-        """Genera un report Excel dai risultati raccolti, uno sheet per pagina."""
-        self.logger.info("Generazione report Excel...")
+        """Generate an Excel report from collected results, one sheet per page."""
+        logger.info("Generating Excel report...")
         if not self.results:
-            self.logger.warning("Nessun risultato da esportare.")
+            logger.warning("No results to export.")
             return
-        excel_path = Path(self.excel_filename)
+            
+        # Support both string and Path objects for excel_filename
+        if isinstance(self.excel_filename, str):
+            excel_path = Path(self.excel_filename)
+        else:
+            excel_path = self.excel_filename
+            
+        # Ensure parent directory exists
         if not excel_path.parent.exists():
             try:
                 excel_path.parent.mkdir(parents=True, exist_ok=True)
-                self.logger.info(f"Cartella '{excel_path.parent}' creata.")
+                logger.info(f"Created directory '{excel_path.parent}'.")
             except Exception as e:
-                self.logger.exception(f"Errore nella creazione della cartella '{excel_path.parent}': {e}")
+                logger.exception(f"Error creating directory '{excel_path.parent}': {e}")
                 return
         try:
-            sheet_counter = {}  # Per gestire nomi duplicati
+            sheet_counter = {}  # For handling duplicate names
             
-            with pd.ExcelWriter(self.excel_filename, engine="openpyxl") as writer:
+            with pd.ExcelWriter(str(excel_path), engine="openpyxl") as writer:
                 for url, issues in self.results.items():
-                    # Estrai dominio e percorso per nome sheet
+                    # Extract domain and path for sheet name
                     parsed = urlparse(url)
                     domain = parsed.netloc.replace("www.", "")
                     
-                    # Estrai l'ultimo segmento del percorso per il nome sheet
+                    # Extract the last segment of the path for the sheet name
                     path = parsed.path.rstrip('/')
                     if path:
                         last_segment = path.split('/')[-1]
                     else:
                         last_segment = "home"
                     
-                    # Crea nome sheet base
+                    # Create base sheet name
                     base_name = f"{domain}_{last_segment}"
-                    base_name = re.sub(r'[\\/*?:\[\]]', '_', base_name)[:28]  # Lascia spazio per un numero
+                    base_name = re.sub(r'[\\/*?:\[\]]', '_', base_name)[:28]  # Leave room for a number
                     
-                    # Gestisci i duplicati aggiungendo un contatore
+                    # Handle duplicates by adding a counter
                     if base_name in sheet_counter:
                         sheet_counter[base_name] += 1
                         sheet_name = f"{base_name}_{sheet_counter[base_name]}"
@@ -475,7 +512,7 @@ class AxeAnalysis:
                         sheet_counter[base_name] = 1
                         sheet_name = base_name
                     
-                    # Limita a 31 caratteri (max per Excel)
+                    # Limit to 31 characters (Excel max)
                     sheet_name = sheet_name[:31]
                     
                     df = pd.DataFrame(issues) if issues else pd.DataFrame(columns=[
@@ -483,47 +520,50 @@ class AxeAnalysis:
                         "help", "target", "html", "failure_summary"
                     ])
                     
-                    # Aggiungi URL alla prima riga se manca
+                    # Add URL to first row if missing
                     if df.empty:
                         df = pd.DataFrame([{"page_url": url, "violation_id": "N/A", 
-                                          "impact": "N/A", "description": "Nessun problema rilevato"}])
+                                          "impact": "N/A", "description": "No issues detected"}])
                     
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    self.logger.debug(f"Sheet '{sheet_name}' creato per {url}")
+                    logger.debug(f"Sheet '{sheet_name}' created for {url}")
             
-            # Rinomina le intestazioni per renderle più leggibili
-            rename_headers(self.excel_filename, self.excel_filename)
+            # Rename headers to make them more readable
+            rename_headers(str(excel_path), str(excel_path))
             
-            self.logger.info(f"Report Excel generato: '{self.excel_filename}'")
-            self.logger.info(f"Contiene {len(self.results)} sheet, uno per ogni URL rappresentativo analizzato")
+            logger.info(f"Excel report generated: '{excel_path}'")
+            logger.info(f"Contains {len(self.results)} sheets, one for each representative URL analyzed")
             
         except Exception as e:
-            self.logger.exception(f"Errore nella generazione del report Excel: {e}")
+            logger.exception(f"Error generating Excel report: {e}")
 
     def start(self) -> None:
-        """Avvia il processing e genera il report al termine."""
+        """Start processing and generate the report when done."""
         asyncio.run(self.run())
         self.generate_excel_report()
 
 def main() -> None:
     """
-    Esempio d'uso con il nuovo crawler multi-dominio:
+    Example usage with the new multi-domain crawler:
     """
+    # Initialize configuration
+    config = config_manager.load_domain_config("sapglegal.com")
+    
     crawler_output_dir = "/home/ec2-user/axeScraper/src/multi_domain_crawler/output_crawler"
     fallback_urls = ["https://sapglegal.com/"]
     
     analyzer = AxeAnalysis(
         crawler_output_dir=crawler_output_dir,
-        domains="sapglegal.com",  # Opzionale: limita a questi domini
-        max_templates_per_domain=50,  # Limita il numero di URL per dominio
+        domains="sapglegal.com",  # Optional: limit to these domains
+        max_templates_per_domain=config["axe_config"]["max_templates_per_domain"],
         fallback_urls=fallback_urls,
-        pool_size=6,  # Numero di driver paralleli nel pool
-        sleep_time=1.5,
-        excel_filename="/home/ec2-user/axeScraper/output_axe/accessibility_report_multi.xlsx",
-        visited_file="/home/ec2-user/axeScraper/output_axe/visited_urls_multi.txt",
-        headless=True,
-        resume=True,  # Riprendi l'analisi da dove era stata interrotta
-        output_folder="/home/ec2-user/axeScraper/output_axe"
+        pool_size=config["axe_config"]["pool_size"],
+        sleep_time=config["axe_config"]["sleep_time"],
+        excel_filename=config["axe_config"]["excel_filename"],
+        visited_file=config["axe_config"]["visited_file"],
+        headless=config["axe_config"]["headless"],
+        resume=config["axe_config"]["resume"],
+        output_folder=config["axe_config"]["output_folder"]
     )
     analyzer.start()
 

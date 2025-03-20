@@ -1,6 +1,7 @@
-# src/pipeline.py
+#!/usr/bin/env python3
 """
 Main pipeline orchestration with explicit stage dependencies and data flow.
+Uses enhanced configuration management system.
 """
 
 import asyncio
@@ -11,23 +12,22 @@ import time
 import subprocess
 from typing import Dict, Any, List, Optional
 from pathlib import Path
-from .axcel import AxeAnalysis
-from .analysis import AccessibilityAnalyzer
+
+# Import core components
+from .axcel.axcel import AxeAnalysis
+from .analysis.report_analysis import AccessibilityAnalyzer
 from .utils.send_mail import send_email_report
-# Import standardized logging and output management
+
+# Import configuration management
+from .utils.config_manager import ConfigurationManager
 from .utils.logging_config import get_logger
 from .utils.output_manager import OutputManager
-from .utils.config import (
-    BASE_URLS,
-    URL_CONFIGS,
-    PIPELINE_CONFIG,
-    EMAIL_CONFIG,
-    LOGGING_CONFIG,
-    OUTPUT_CONFIG,
-)
+
+# Initialize configuration manager
+config_manager = ConfigurationManager(project_name="axeScraper")
 
 # Set up logger with pipeline-specific configuration
-logger = get_logger("pipeline", LOGGING_CONFIG.get("components", {}).get("pipeline", {}))
+logger = get_logger("pipeline", config_manager.get_logging_config()["components"]["pipeline"])
 
 # Global state
 crawler_processes = {}
@@ -64,7 +64,10 @@ signal.signal(signal.SIGINT, handle_shutdown)
 
 async def monitor_resources():
     """Monitor system resources and pause if thresholds are exceeded."""
-    resource_config = PIPELINE_CONFIG.get("resource_monitoring", {})
+    # Get resource monitoring config
+    pipeline_config = config_manager.get_pipeline_config()
+    resource_config = pipeline_config.get("resource_monitoring", {})
+    
     threshold_cpu = resource_config.get("threshold_cpu", 90)
     threshold_memory = resource_config.get("threshold_memory", 85)
     check_interval = resource_config.get("check_interval", 3)
@@ -85,12 +88,12 @@ async def monitor_resources():
                     elapsed = time.time() - start_time
                     if elapsed > 0:
                         logger.info(f"Performance: CPU={cpu:.1f}%, Memory={mem:.1f}%, "
-                                   f"Uptime={elapsed/60:.1f} minutes")
+                                  f"Uptime={elapsed/60:.1f} minutes")
                 
                 # Pause if resources are constrained
                 if cpu > threshold_cpu or mem > threshold_memory:
                     logger.warning(f"High resource usage: CPU={cpu:.1f}%, Memory={mem:.1f}%. "
-                                  f"Pausing for {cool_down_time} seconds...")
+                                 f"Pausing for {cool_down_time} seconds...")
                     
                     # Run garbage collection to free memory
                     if mem > threshold_memory:
@@ -115,7 +118,7 @@ def run_multi_domain_crawler(base_url: str, crawler_config: Dict[str, Any], outp
     log_file = str(output_manager.get_timestamped_path(
         "logs", f"crawler_{output_manager.domain_slug}", "log"))
     
-    # Get crawler parameters directly from crawler_config
+    # Get crawler parameters from crawler_config
     domains = crawler_config.get("domains", base_url)
     max_urls_per_domain = crawler_config.get("max_urls", 1000)
     hybrid_mode = "True" if crawler_config.get("hybrid_mode", True) else "False"
@@ -160,11 +163,14 @@ def run_multi_domain_crawler(base_url: str, crawler_config: Dict[str, Any], outp
         logger.error(f"Failed to start crawler for {base_url}: {e}")
         raise
     
-async def run_crawler(base_url: str, config: Dict[str, Any], output_manager: OutputManager) -> bool:
+async def run_crawler(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
     """Run crawler component with standardized path management."""
     global crawler_processes
     
     logger.info(f"Starting crawler for {base_url}")
+    
+    # Get crawler configuration
+    crawler_config = domain_config.get("crawler_config", {})
     
     # Get standardized paths from output manager
     output_dir = str(output_manager.get_path("crawler"))
@@ -177,34 +183,11 @@ async def run_crawler(base_url: str, config: Dict[str, Any], output_manager: Out
     output_manager.ensure_path_exists("crawler")
     output_manager.ensure_path_exists("logs")
     
-    # Build command with consistent parameters
-    cmd = [
-        "python", "-m", "src.multi_domain_crawler.multi_domain_crawler.spiders.multi_domain_spider",
-        "-a", f"domains={config.get('domains', base_url)}",
-        "-a", f"max_urls_per_domain={config.get('max_urls', 500)}",
-        "-a", f"hybrid_mode={'True' if config.get('hybrid_mode', True) else 'False'}",
-        "-a", f"request_delay={config.get('request_delay', 0.25)}",
-        "-s", f"OUTPUT_DIR={output_dir}",
-        "-s", f"CONCURRENT_REQUESTS={config.get('max_workers', 16)}",
-        "-s", f"DOWNLOAD_DELAY={config.get('request_delay', 0.25)}",
-        "--logfile", f"{log_file}"
-    ]
-    
-    # Log command for debugging
-    logger.info(f"Crawler command: {' '.join(cmd)}")
-    
     try:
-        # Start the crawler as a subprocess
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            cwd=str(Path(__file__).parent.parent)  # Project root
-        )
+        # Start the multi-domain crawler as a subprocess
+        process = run_multi_domain_crawler(base_url, crawler_config, output_manager)
         
         crawler_processes[base_url] = process
-        logger.info(f"Crawler started with PID {process.pid}")
         
         # Monitor process execution
         while process.poll() is None:
@@ -230,9 +213,9 @@ async def run_crawler(base_url: str, config: Dict[str, Any], output_manager: Out
         
         # Read any remaining output
         stdout, stderr = process.communicate()
-        if stdout.strip():
+        if stdout and stdout.strip():
             logger.info(f"Final crawler output: {stdout.strip()}")
-        if stderr.strip():
+        if stderr and stderr.strip():
             logger.warning(f"Final crawler errors: {stderr.strip()}")
         
         if return_code == 0:
@@ -249,9 +232,12 @@ async def run_crawler(base_url: str, config: Dict[str, Any], output_manager: Out
         # Remove process from tracking
         crawler_processes.pop(base_url, None)
 
-async def run_axe_analysis(base_url: str, config: Dict[str, Any], output_manager: OutputManager) -> bool:
+async def run_axe_analysis(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
     """Run Axe analysis with standardized path management."""
     logger.info(f"Starting Axe analysis for {base_url}")
+    
+    # Get axe configuration
+    axe_config = domain_config.get("axe_config", {})
     
     # Get standardized paths
     analysis_state_file = str(output_manager.get_path(
@@ -274,15 +260,15 @@ async def run_axe_analysis(base_url: str, config: Dict[str, Any], output_manager
         analyzer = AxeAnalysis(
             urls=None,
             analysis_state_file=analysis_state_file,
-            domains=config.get("domains"),
-            max_templates_per_domain=config.get("max_templates_per_domain"),
+            domains=axe_config.get("domains"),
+            max_templates_per_domain=axe_config.get("max_templates_per_domain"),
             fallback_urls=[base_url],
-            pool_size=config.get("pool_size", 5),
-            sleep_time=config.get("sleep_time", 1),
+            pool_size=axe_config.get("pool_size", 5),
+            sleep_time=axe_config.get("sleep_time", 1),
             excel_filename=excel_filename,
             visited_file=visited_file,
-            headless=config.get("headless", True),
-            resume=config.get("resume", True),
+            headless=axe_config.get("headless", True),
+            resume=axe_config.get("resume", True),
             output_folder=str(output_manager.get_path("axe")),
             output_manager=output_manager
         )
@@ -302,9 +288,12 @@ async def run_axe_analysis(base_url: str, config: Dict[str, Any], output_manager
         logger.exception(f"Error in Axe analysis: {e}")
         return False
 
-async def run_final_report(base_url: str, config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
+async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Generate final accessibility report with standardized path management."""
     logger.info(f"Generating final report for {base_url}")
+    
+    # Get report configuration
+    report_config = domain_config.get("report_config", {})
     
     # Get standardized paths
     input_excel = str(output_manager.get_path(
@@ -369,18 +358,19 @@ async def run_final_report(base_url: str, config: Dict[str, Any], output_manager
         logger.exception(f"Error generating final report: {e}")
         return None
 
-async def process_url(base_url: str, url_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
+async def process_url(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Process a URL through the complete pipeline with explicit stage progression."""
     logger.info(f"Processing {base_url} through the pipeline")
     
-    # Get stage configuration
-    start_stage = PIPELINE_CONFIG.get("start_stage", "crawler")
-    repeat_axe = PIPELINE_CONFIG.get("repeat_axe", 1)
+    # Get pipeline configuration
+    pipeline_config = config_manager.get_pipeline_config()
+    start_stage = pipeline_config.get("start_stage", "crawler")
+    repeat_axe = pipeline_config.get("repeat_axe", 1)
     
     # Run crawler if starting from that stage
     if start_stage == "crawler":
         logger.info(f"Starting with crawler stage for {base_url}")
-        crawler_success = await run_crawler(base_url, url_config["crawler_config"], output_manager)
+        crawler_success = await run_crawler(base_url, domain_config, output_manager)
         
         if not crawler_success:
             logger.warning(f"Crawler stage failed for {base_url}, but continuing with pipeline")
@@ -397,7 +387,7 @@ async def process_url(base_url: str, url_config: Dict[str, Any], output_manager:
         
         for i in range(repeat_axe):
             logger.info(f"Axe analysis iteration {i+1}/{repeat_axe} for {base_url}")
-            axe_success = await run_axe_analysis(base_url, url_config["axe_analysis_config"], output_manager)
+            axe_success = await run_axe_analysis(base_url, domain_config, output_manager)
             
             if not axe_success:
                 logger.warning(f"Axe analysis iteration {i+1} failed for {base_url}")
@@ -415,7 +405,7 @@ async def process_url(base_url: str, url_config: Dict[str, Any], output_manager:
     # Generate final report
     if not shutdown_flag:
         logger.info(f"Generating final report for {base_url}")
-        report_path = await run_final_report(base_url, url_config["final_report_config"], output_manager)
+        report_path = await run_final_report(base_url, domain_config, output_manager)
         
         if report_path:
             logger.info(f"Final report generated for {base_url}: {report_path}")
@@ -432,9 +422,13 @@ async def main():
     global start_time, output_managers
     start_time = time.time()
     
+    # Get all domains to process
+    base_urls = config_manager.get_all_domains()
+    
     logger.info("Starting accessibility testing pipeline")
-    logger.info(f"Configuration: Start stage: {PIPELINE_CONFIG.get('start_stage', 'crawler')}, "
-               f"Repeat Axe: {PIPELINE_CONFIG.get('repeat_axe', 1)}")
+    pipeline_config = config_manager.get_pipeline_config()
+    logger.info(f"Configuration: Start stage: {pipeline_config.get('start_stage', 'crawler')}, "
+               f"Repeat Axe: {pipeline_config.get('repeat_axe', 1)}")
     
     # System information for troubleshooting
     cpu_count = os.cpu_count()
@@ -445,9 +439,14 @@ async def main():
     
     # Initialize output managers for all URLs
     output_managers = {}
-    for base_url, url_config in URL_CONFIGS.items():
+    for base_url in base_urls:
+        # Get domain configuration
+        domain_config = config_manager.load_domain_config(base_url)
+        
+        # Create output manager for this domain
+        output_root = config_manager.get_path("OUTPUT_DIR", "~/axeScraper/output", create=True)
         output_managers[base_url] = OutputManager(
-            base_dir=os.path.expanduser("~/axeScraper/output"),
+            base_dir=output_root,
             domain=base_url,
             create_dirs=True
         )
@@ -457,21 +456,23 @@ async def main():
     
     # Process each URL through the pipeline
     report_paths = []
-    for base_url, url_config in URL_CONFIGS.items():
+    for base_url in base_urls:
         if shutdown_flag:
             logger.warning("Shutdown requested, stopping pipeline")
             break
             
         logger.info(f"Processing URL: {base_url}")
+        domain_config = config_manager.load_domain_config(base_url)
         output_manager = output_managers[base_url]
         
         # Run the URL through all appropriate pipeline stages
-        report_path = await process_url(base_url, url_config, output_manager)
+        report_path = await process_url(base_url, domain_config, output_manager)
         if report_path:
             report_paths.append(report_path)
     
     # Send email with reports if configured
-    if not shutdown_flag and report_paths and EMAIL_CONFIG.get("recipient_email"):
+    email_config = config_manager.get_email_config()
+    if not shutdown_flag and report_paths and email_config.get("recipient_email"):
         try:
             logger.info(f"Sending email with {len(report_paths)} reports")
             send_email_report(report_paths)
@@ -487,7 +488,7 @@ async def main():
     
     # Log pipeline completion
     logger.info(f"Pipeline completed in {int(hours)}:{int(minutes):02}:{int(seconds):02}")
-    logger.info(f"Processed {len(URL_CONFIGS)} URLs, generated {len(report_paths)} reports")
+    logger.info(f"Processed {len(base_urls)} URLs, generated {len(report_paths)} reports")
     
     # Stop resource monitoring
     resource_monitor.cancel()
