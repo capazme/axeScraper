@@ -313,6 +313,9 @@ async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_
     # Get standardized paths
     input_excel = str(output_manager.get_path(
         "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
+    # Path per il file Excel concatenato
+    concat_excel = str(output_manager.get_path(
+        "analysis", f"accessibility_report_{output_manager.domain_slug}_concat.xlsx"))
     output_excel = str(output_manager.get_path(
         "analysis", f"final_analysis_{output_manager.domain_slug}.xlsx"))
     crawler_state = str(output_manager.get_path(
@@ -329,12 +332,19 @@ async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_
         return None
     
     try:
+        # NUOVO PASSAGGIO: Concatenare i fogli Excel dall'output di Axe
+        from src.utils.concat import concat_excel_sheets
+        logger.info(f"Concatenating Excel sheets from {input_excel}")
+        concat_excel_path = concat_excel_sheets(file_path=input_excel, output_path=concat_excel)
+        logger.info(f"Excel sheets concatenated and saved to {concat_excel_path}")
+        
         # Create analyzer with output manager
         analyzer = AccessibilityAnalyzer(output_manager=output_manager)
         
         # Execute analysis pipeline with clear stage progression
         logger.info(f"Loading accessibility data for {base_url}")
-        axe_df = analyzer.load_data(input_excel, crawler_state)
+        # Usa il file Excel concatenato invece dell'originale
+        axe_df = analyzer.load_data(concat_excel_path, crawler_state)
         
         logger.info(f"Calculating metrics for {base_url}")
         metrics = analyzer.calculate_metrics(axe_df)
@@ -372,7 +382,6 @@ async def run_final_report(base_url: str, domain_config: Dict[str, Any], output_
     except Exception as e:
         logger.exception(f"Error generating final report: {e}")
         return None
-
 async def process_url(base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
     """Process a URL through the complete pipeline with explicit stage progression."""
     logger.info(f"Processing {base_url} through the pipeline")
