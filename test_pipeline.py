@@ -1,14 +1,14 @@
 import asyncio
-from ..src.pipeline import process_url
-from ..src.utils.config_manager import ConfigurationManager
-from ..src.utils.output_manager import OutputManager
+from src.pipeline import process_url
+from src.utils.config_manager import ConfigurationManager
+from src.utils.output_manager import OutputManager
 
 async def main():
     # Carica configurazione
-    config = ConfigurationManager(env_file='.env')
+    config = ConfigurationManager()
     
     # Usa un singolo dominio per il test
-    base_url = 'example.com'
+    base_url = 'https://www.iccreabanca.it/it-IT/Pagine/default.aspx'
     domain_config = config.load_domain_config(base_url)
     
     # Crea output manager

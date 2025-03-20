@@ -12,6 +12,5 @@ __pycache__
 test.py
 *.png
 crawls
-*.json
 .env
 .scrapy

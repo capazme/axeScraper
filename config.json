@@ -1,0 +1,50 @@
+{
+    "BASE_URLS": [
+      "https://www.iccreabanca.it/it-IT/Pagine/default.aspx"
+    ],
+    "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
+    "START_STAGE": "crawler",
+    "REPEAT_ANALYSIS": 1,
+    "RESOURCE_MONITORING": true,
+    "RESOURCE_CHECK_INTERVAL": 5,
+    "CPU_THRESHOLD": 85,
+    "MEMORY_THRESHOLD": 80,
+    "COOL_DOWN_TIME": 10,
+    
+    "LOG_DIR": "${OUTPUT_DIR}/logs",
+    "LOG_LEVEL": "INFO",
+    "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
+    "LOG_CONSOLE": true,
+    "LOG_ROTATING": true,
+    "LOG_MAX_BYTES": 10485760,
+    "LOG_BACKUP_COUNT": 5,
+    "CRAWLER_LOG_LEVEL": "INFO",
+    "ANALYSIS_LOG_LEVEL": "INFO",
+    "REPORT_LOG_LEVEL": "INFO",
+    "PIPELINE_LOG_LEVEL": "INFO",
+    
+    "EMAIL_RECIPIENT": "admin@example.com",
+    "EMAIL_SUBJECT": "Accessibility Reports",
+    "EMAIL_BODY": "The accessibility reports are ready.",
+    "SMTP_SERVER": "smtp.example.com",
+    "SMTP_PORT": 587,
+    "SMTP_USERNAME": "user@example.com",
+    "SMTP_PASSWORD": "securepassword",
+    "SMTP_TLS": true,
+    "MUTT_COMMAND": "mutt -s",
+    
+    "CRAWLER_MAX_WORKERS": 16,
+    "CRAWLER_MAX_URLS": 100,
+    "CRAWLER_MAX_RETRIES": 10,
+    "CRAWLER_REQUEST_DELAY": 0.5,
+    "CRAWLER_HYBRID_MODE": true,
+    "CRAWLER_PENDING_THRESHOLD": 250,
+    
+    "MAX_TEMPLATES": 1000000,
+    "POOL_SIZE": 5,
+    "SLEEP_TIME": 1,
+    "HEADLESS": true,
+    "RESUME": true
+  }
+  

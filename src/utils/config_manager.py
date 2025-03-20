@@ -451,7 +451,7 @@ class ConfigurationManager:
         # Crawler configuration with flexible state file paths
         crawler_config = {
             "domains": clean_domain,
-            "max_urls": self.get_int("CRAWLER_MAX_URLS", 500),
+            "max_urls": self.get_int("CRAWLER_MAX_URLS", 100),
             "max_retries": self.get_int("CRAWLER_MAX_RETRIES", 10),
             "request_delay": self.get_float("CRAWLER_REQUEST_DELAY", 0.25),
             "hybrid_mode": self.get_bool("CRAWLER_HYBRID_MODE", True),
