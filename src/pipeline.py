@@ -49,13 +49,30 @@ class Pipeline:
     - Gestione dei segnali di interruzione
     """
     
-    def __init__(self):
-        """Inizializza il pipeline con la configurazione globale."""
-        # Inizializza il gestore di configurazione
-        self.config_manager = ConfigurationManager(project_name="axeScraper")
+    def __init__(self, config_file: Optional[str] = None, cli_args: Optional[Dict[str, Any]] = None):
+        """
+        Inizializza il pipeline con la configurazione globale.
+        
+        Args:
+            config_file: Percorso del file di configurazione (opzionale)
+            cli_args: Argomenti da linea di comando (opzionale)
+        """
+        # Inizializza il gestore di configurazione con il nuovo schema
+        self.config_manager = ConfigurationManager(
+            project_name="axeScraper",
+            config_file=config_file,
+            cli_args=cli_args or {}
+        )
+        
+        # Attiva la modalità debug se richiesto
+        if self.config_manager.get_bool("DEBUG", False):
+            self.config_manager.set_debug_mode(True)
         
         # Configura il logger
         self.logger = get_logger("pipeline", self.config_manager.get_logging_config()["components"]["pipeline"])
+        
+        # Mostra riepilogo configurazione all'avvio
+        self.config_manager.log_config_summary()
         
         # Informazioni sul sistema
         self.logger.info(f"Risorse sistema: {os.cpu_count()} CPU, "
@@ -74,6 +91,15 @@ class Pipeline:
         # Carica pipeline config
         self.pipeline_config = self.config_manager.get_pipeline_config()
         
+        # Log dei parametri chiave (usando le chiavi standardizzate)
+        self.logger.info("Parametri chiave di configurazione:")
+        self.logger.info(f"CRAWLER_MAX_URLS: {self.config_manager.get_int('CRAWLER_MAX_URLS')}")
+        self.logger.info(f"CRAWLER_HYBRID_MODE: {self.config_manager.get_bool('CRAWLER_HYBRID_MODE')}")
+        self.logger.info(f"CRAWLER_PENDING_THRESHOLD: {self.config_manager.get_int('CRAWLER_PENDING_THRESHOLD')}")
+        self.logger.info(f"AXE_MAX_TEMPLATES: {self.config_manager.get_int('AXE_MAX_TEMPLATES')}")
+        self.logger.info(f"START_STAGE: {self.config_manager.get('START_STAGE')}")
+        self.logger.info(f"REPEAT_ANALYSIS: {self.config_manager.get_int('REPEAT_ANALYSIS')}")
+            
     def _handle_shutdown(self, signum, _):
         """Gestisce i segnali di interruzione con pulizia ordinata."""
         self.shutdown_flag = True
@@ -185,6 +211,22 @@ class Pipeline:
             clean_domain = output_manager.domain.replace("http://", "").replace("https://", "").replace("www.", "")
             clean_domain = clean_domain.split('/')[0]
             
+            # Ottieni i valori configurazione dalle chiavi standardizzate
+            max_urls = crawler_config.get('max_urls', self.config_manager.get_int("CRAWLER_MAX_URLS", 100))
+            hybrid_mode = crawler_config.get('hybrid_mode', self.config_manager.get_bool("CRAWLER_HYBRID_MODE", True))
+            request_delay = crawler_config.get('request_delay', self.config_manager.get_float("CRAWLER_REQUEST_DELAY", 0.25))
+            selenium_threshold = crawler_config.get('pending_threshold', self.config_manager.get_int("CRAWLER_PENDING_THRESHOLD", 30))
+            max_workers = crawler_config.get('max_workers', self.config_manager.get_int("CRAWLER_MAX_WORKERS", 16))
+            
+            # Log configurazione con chiavi standardizzate
+            self.logger.info(f"Configurazione crawler:")
+            self.logger.info(f"Domain: {clean_domain}")
+            self.logger.info(f"CRAWLER_MAX_URLS: {max_urls}")
+            self.logger.info(f"CRAWLER_HYBRID_MODE: {hybrid_mode}")
+            self.logger.info(f"CRAWLER_REQUEST_DELAY: {request_delay}")
+            self.logger.info(f"CRAWLER_PENDING_THRESHOLD: {selenium_threshold}")
+            self.logger.info(f"CRAWLER_MAX_WORKERS: {max_workers}")
+            
             # Verifica se il processo esiste già
             if base_url in self.running_processes and self.running_processes[base_url] and self.running_processes[base_url].poll() is None:
                 self.logger.warning(f"Processo crawler per {base_url} già in esecuzione")
@@ -209,17 +251,17 @@ class Pipeline:
                 
             self.logger.info(f"Directory crawler: {cwd}")
                 
-            # Configura il comando
+            # Configura il comando con i parametri standardizzati
             cmd = [
                 "python", "-m", "scrapy", "crawl", "multi_domain_spider",
                 "-a", f"domains={clean_domain}",
-                "-a", f"max_urls_per_domain={crawler_config.get('max_urls', 1000)}",
-                "-a", f"hybrid_mode={'True' if crawler_config.get('hybrid_mode', True) else 'False'}",
-                "-a", f"request_delay={crawler_config.get('request_delay', 0.25)}",
-                "-a", f"selenium_threshold={crawler_config.get('pending_threshold', 30)}",
+                "-a", f"max_urls_per_domain={max_urls}",  # Usa il valore standardizzato
+                "-a", f"hybrid_mode={'True' if hybrid_mode else 'False'}",  # Usa il valore standardizzato
+                "-a", f"request_delay={request_delay}",  # Usa il valore standardizzato
+                "-a", f"selenium_threshold={selenium_threshold}",  # Usa il valore standardizzato
                 "-s", f"OUTPUT_DIR={output_dir}",
-                "-s", f"CONCURRENT_REQUESTS={crawler_config.get('max_workers', 16)}",
-                "-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={max(8, crawler_config.get('max_workers', 16) // 2)}",
+                "-s", f"CONCURRENT_REQUESTS={max_workers}",  # Usa il valore standardizzato
+                "-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={max(8, max_workers // 2)}",
                 "-s", f"LOG_LEVEL=INFO",
                 "-s", f"PIPELINE_REPORT_FORMAT=all",
                 "--logfile", f"{log_file}"
@@ -227,7 +269,7 @@ class Pipeline:
             
             # Log comando completo
             self.logger.info(f"Comando crawler: {' '.join(cmd)}")
-            
+                    
             # Esegui comando
             process = subprocess.Popen(
                 cmd,
@@ -321,6 +363,26 @@ class Pipeline:
         fallback_urls = [base_url]
         crawler_file_exists = os.path.exists(analysis_state_file)
         
+        # Ottieni i valori configurazione dalle chiavi standardizzate
+        max_templates = axe_config.get('max_templates_per_domain', 
+                                self.config_manager.get_int("AXE_MAX_TEMPLATES", 50))
+        pool_size = axe_config.get('pool_size', 
+                            self.config_manager.get_int("AXE_POOL_SIZE", 5))
+        sleep_time = axe_config.get('sleep_time', 
+                            self.config_manager.get_float("AXE_SLEEP_TIME", 1.0))
+        headless = axe_config.get('headless', 
+                            self.config_manager.get_bool("AXE_HEADLESS", True))
+        resume = axe_config.get('resume', 
+                        self.config_manager.get_bool("AXE_RESUME", True))
+        
+        # Log configurazione con chiavi standardizzate
+        self.logger.info(f"Configurazione Axe Analysis:")
+        self.logger.info(f"AXE_MAX_TEMPLATES: {max_templates}")
+        self.logger.info(f"AXE_POOL_SIZE: {pool_size}")
+        self.logger.info(f"AXE_SLEEP_TIME: {sleep_time}")
+        self.logger.info(f"AXE_HEADLESS: {headless}")
+        self.logger.info(f"AXE_RESUME: {resume}")
+        
         if not crawler_file_exists:
             self.logger.warning(f"File stato crawler non trovato: {analysis_state_file}")
             self.logger.info(f"Utilizzo URL fallback: {base_url}")
@@ -333,14 +395,14 @@ class Pipeline:
                 urls=None,
                 analysis_state_file=analysis_state_file if crawler_file_exists else None,
                 domains=axe_config.get("domains"),
-                max_templates_per_domain=axe_config.get("max_templates_per_domain"),
+                max_templates_per_domain=max_templates,  # Usa il valore standardizzato
                 fallback_urls=fallback_urls,
-                pool_size=axe_config.get("pool_size", 5),
-                sleep_time=axe_config.get("sleep_time", 1),
+                pool_size=pool_size,  # Usa il valore standardizzato
+                sleep_time=sleep_time,  # Usa il valore standardizzato
                 excel_filename=excel_filename,
                 visited_file=visited_file,
-                headless=axe_config.get("headless", True),
-                resume=axe_config.get("resume", True),
+                headless=headless,  # Usa il valore standardizzato
+                resume=resume,  # Usa il valore standardizzato
                 output_folder=str(output_manager.get_path("axe")),
                 output_manager=output_manager
             )
@@ -400,7 +462,7 @@ class Pipeline:
         
         try:
             # NUOVO PASSAGGIO: Concatenare i fogli Excel dall'output di Axe
-            from src.utils.concat import concat_excel_sheets
+            from utils.concat import concat_excel_sheets
             self.logger.info(f"Concatenazione fogli Excel da {input_excel}")
             concat_excel_path = concat_excel_sheets(file_path=input_excel, output_path=concat_excel)
             self.logger.info(f"Fogli Excel concatenati e salvati in {concat_excel_path}")
@@ -479,12 +541,12 @@ class Pipeline:
         # Memorizza l'output manager per riferimento futuro
         self.output_managers[base_url] = output_manager 
         
-        # Ottieni configurazione pipeline
-        start_stage = self.pipeline_config.get("start_stage", "crawler")
-        repeat_axe = self.pipeline_config.get("repeat_axe", 1)
+        # Ottieni configurazione pipeline con chiavi standardizzate
+        start_stage = self.pipeline_config.get("start_stage") or self.config_manager.get("START_STAGE", "crawler")
+        repeat_axe = self.pipeline_config.get("repeat_axe") or self.config_manager.get_int("REPEAT_ANALYSIS", 1)
         
         # Log configurazione per debug
-        self.logger.info(f"Pipeline config: start_stage={start_stage}, repeat_axe={repeat_axe}")
+        self.logger.info(f"Pipeline config: START_STAGE={start_stage}, REPEAT_ANALYSIS={repeat_axe}")
         self.logger.info(f"Output manager: base_dir={output_manager.base_dir}, domain={output_manager.domain}")
         
         # Esegui crawler se iniziamo da quella fase
@@ -640,8 +702,34 @@ class Pipeline:
             return 2
 
 async def main():
-    """Entry point del programma."""
-    pipeline = Pipeline()
+    """Entry point del programma con supporto per parametri CLI."""
+    import argparse
+    
+    # Crea parser per argomenti da linea di comando
+    parser = argparse.ArgumentParser(description='Pipeline di analisi accessibilità axeScraper')
+    parser.add_argument('--config', '-c', help='File di configurazione')
+    parser.add_argument('--domains', '-d', help='Domini da analizzare (separati da virgola)')
+    parser.add_argument('--start', '-s', choices=['crawler', 'axe', 'analysis'], 
+                        help='Stadio iniziale del pipeline')
+    parser.add_argument('--max-urls', '-m', type=int, help='Numero massimo di URL per dominio')
+    parser.add_argument('--debug', action='store_true', help='Attiva modalità debug')
+    
+    # Elabora gli argomenti
+    args = parser.parse_args()
+    
+    # Converti argomenti in un dizionario per ConfigurationManager
+    cli_args = {}
+    if args.domains:
+        cli_args['BASE_URLS'] = args.domains
+    if args.start:
+        cli_args['START_STAGE'] = args.start
+    if args.max_urls:
+        cli_args['CRAWLER_MAX_URLS'] = args.max_urls
+    if args.debug:
+        cli_args['DEBUG'] = True
+    
+    # Inizializza e avvia pipeline
+    pipeline = Pipeline(config_file=args.config, cli_args=cli_args)
     exit_code = await pipeline.run()
     return exit_code
 

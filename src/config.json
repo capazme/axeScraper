@@ -1,6 +1,7 @@
 {
   "BASE_URLS": [
-    "https://www.iccreabanca.it/it-IT/Pagine/default.aspx"
+    "https://www.iccreabanca.it/it-IT/Pagine/default.aspx",
+    "https://www.henryschein-dental.de/"
   ],
   "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
   "START_STAGE": "crawler",
@@ -11,7 +12,7 @@
   "MEMORY_THRESHOLD": 80,
   "COOL_DOWN_TIME": 10,
   
-  "LOG_DIR": "${OUTPUT_DIR}/logs",
+  "LOG_DIR":"home/ec2-user/axeScraper/output/logs",
   "LOG_LEVEL": "INFO",
   "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
   "LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
@@ -24,7 +25,7 @@
   "REPORT_LOG_LEVEL": "INFO",
   "PIPELINE_LOG_LEVEL": "INFO",
   
-  "EMAIL_RECIPIENT": "admin@example.com",
+  "EMAIL_RECIPIENT": "roma.01@sapglegal.com",
   "EMAIL_SUBJECT": "Accessibility Reports",
   "EMAIL_BODY": "The accessibility reports are ready.",
   "SMTP_SERVER": "smtp.example.com",

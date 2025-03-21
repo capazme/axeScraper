@@ -14,3 +14,4 @@ test.py
 crawls
 .env
 .scrapy
+output/*
