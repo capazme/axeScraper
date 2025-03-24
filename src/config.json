@@ -1,7 +1,6 @@
 {
   "BASE_URLS": [
-    "https://www.iccreabanca.it/it-IT/Pagine/default.aspx",
-    "https://www.henryschein-dental.de/"
+    "https://www.locautorent.com/"
   ],
   "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
   "START_STAGE": "crawler",
@@ -11,6 +10,87 @@
   "CPU_THRESHOLD": 85,
   "MEMORY_THRESHOLD": 80,
   "COOL_DOWN_TIME": 10,
+
+  "AUTH_ENABLED": true,
+  "AUTH_STRATEGY": "form",
+  "AUTH_LOGIN_URL": "https://www.locautorent.com/it/mylocauto/?int_source=header&int_medium=cta&int_campaign=mylocauto#/auth/login",
+  "AUTH_USERNAME": "guglielmo.puzio00@gmail.com",
+  "AUTH_PASSWORD": "1407megu",
+  "AUTH_USERNAME_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.textInput > div > div > input[type=text]",
+  "AUTH_PASSWORD_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.passwordInput > div > div > input[type=password]",
+  "AUTH_SUBMIT_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > a",
+  "AUTH_SUCCESS_INDICATOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.outScreen > div.osContainer > div > aside > div > ul > li:nth-child(3) > a",
+  "AUTH_ERROR_INDICATOR": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal",
+  
+  "AUTH_PRE_LOGIN_ACTIONS": [
+    {"type": "wait", "seconds": 3},
+    {"type": "script", "code": "var cookieButtons = document.querySelectorAll('#onetrust-accept-btn-handler, .ot-bnr-footer button'); for(var i=0; i<cookieButtons.length; i++) { if(cookieButtons[i].offsetParent !== null) { cookieButtons[i].click(); } }"},
+    {"type": "wait", "seconds": 1}
+  ],
+  
+  "AUTH_POST_LOGIN_ACTIONS": [
+
+  ],
+  
+  "AUTH_DOMAINS": {
+    "locautorent_com": {
+      "restricted_urls": [
+        "https://www.locautorent.com/it/mylocauto/",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/edit-profile"
+      ],
+      "explore_restricted_area": true
+    }
+  },
+
+  "RESTRICTED_AREA_PATTERNS": [
+    "https://www.locautorent.com/it/mylocauto/"
+  ],
+
+  "FUNNELS": {
+    "locauto_rental_flow": {
+      "description": "Processo completo di prenotazione auto su Locauto",
+      "domain": "locautorent_com",
+      "auth_required": true,
+      "steps": [
+        {
+          "name": "HomePage",
+          "url": "https://www.locautorent.com/it/",
+          "wait_for_selector": ".home-container",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 2}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": ".search-box"
+          }
+        },
+        {
+          "name": "LoginPage",
+          "url": "https://www.locautorent.com/it/mylocauto/?int_source=header&int_medium=cta&int_campaign=mylocauto#/auth/login",
+          "wait_for_selector": "input[type='email']",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 2},
+            {"type": "input", "selector": "input[type='email']", "value": "tuo_username@example.com"},
+            {"type": "input", "selector": "input[type='password']", "value": "tua_password"},
+            {"type": "script", "code": "document.querySelector('.submitCta').click();"},
+            {"type": "wait", "seconds": 3}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": ".mylocauto-user-info"
+          }
+        }      ]
+    },
+    "locauto_myaccount_flow": {
+      "description": "Verifica dati personali nell'area Account",
+      "domain": "locautorent_com",
+      "auth_required": true,
+      "steps": [
+      ]
+    }
+  },
   
   "LOG_DIR":"home/ec2-user/axeScraper/output/logs",
   "LOG_LEVEL": "INFO",
@@ -40,7 +120,7 @@
   "CRAWLER_MAX_RETRIES": 10,
   "CRAWLER_REQUEST_DELAY": 0.5,
   "CRAWLER_HYBRID_MODE": true,
-  "CRAWLER_PENDING_THRESHOLD": 250,
+  "CRAWLER_PENDING_THRESHOLD": 70,
   
   "AXE_MAX_TEMPLATES": 50,
   "AXE_POOL_SIZE": 5,

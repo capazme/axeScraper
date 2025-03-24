@@ -268,9 +268,17 @@ class AccessibilityAnalyzer:
         clean_df['wcag_criterion'] = clean_df['violation_id'].apply(self._get_wcag_criterion)
         clean_df['wcag_name'] = clean_df['violation_id'].apply(self._get_wcag_name)
         clean_df['severity_score'] = clean_df['impact'].map(self.impact_weights)
+        
+        # Aggiungi area_type se mancante
+        if 'area_type' not in clean_df.columns:
+            clean_df['area_type'] = 'public'  # Default a 'public'
+        
+        # Assicurati che area_type sia normalizzato
+        clean_df['area_type'] = clean_df['area_type'].fillna('public').str.lower()
+        
         self.logger.info(f"Original rows: {original_count}, remaining: {len(clean_df)}")
         return clean_df
-        
+       
     def _get_wcag_category(self, violation_id: str) -> str:
         """Get WCAG category for a violation ID."""
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
@@ -286,7 +294,6 @@ class AccessibilityAnalyzer:
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
         return self.wcag_categories[key]['name'] if key else "Other"
     
-    # In src/analysis/report_analysis.py
     def _integrate_crawler_data(self, df: pd.DataFrame, crawler_state: str) -> pd.DataFrame:
         """
         Integrate crawler data, e.g., templates and page depth.
@@ -366,6 +373,7 @@ class AccessibilityAnalyzer:
         except Exception as e:
             self.logger.error(f"Error integrating crawler data: {e}", exc_info=True)
             return df
+    
     def calculate_metrics(self, df: pd.DataFrame) -> Dict:
         """
         Calculate basic accessibility metrics.
@@ -384,17 +392,54 @@ class AccessibilityAnalyzer:
         metrics['Total Violations'] = len(df)
         metrics['Unique Pages'] = df['normalized_url'].nunique()
         metrics['Unique Violation Types'] = df['violation_id'].nunique()
+        
+        # Calculate metrics for public and restricted areas
+        df_public = df[df['area_type'] == 'public']
+        df_restricted = df[df['area_type'] == 'restricted']
+        
+        metrics['Public Area Pages'] = df_public['normalized_url'].nunique()
+        metrics['Restricted Area Pages'] = df_restricted['normalized_url'].nunique()
+        metrics['Public Area Violations'] = len(df_public)
+        metrics['Restricted Area Violations'] = len(df_restricted)
+        
+        # Impact counts overall
         impact_counts = df['impact'].value_counts().to_dict()
         for impact, count in sorted(impact_counts.items(), key=lambda x: self.impact_weights.get(x[0], 0), reverse=True):
             metrics[f'{impact.capitalize()} Violations'] = count
+            
+        # Calculate impact counts for public and restricted areas
+        for area_type, area_df in [('Public', df_public), ('Restricted', df_restricted)]:
+            if not area_df.empty:
+                area_impact_counts = area_df['impact'].value_counts().to_dict()
+                for impact, count in sorted(area_impact_counts.items(), key=lambda x: self.impact_weights.get(x[0], 0), reverse=True):
+                    metrics[f'{area_type} {impact.capitalize()} Violations'] = count
+                    
+        # Average violations per page
         unique_pages = metrics['Unique Pages']
         avg_per_page = metrics['Total Violations'] / unique_pages if unique_pages > 0 else 0
         metrics['Average Violations per Page'] = round(avg_per_page, 2)
+        
+        # Averages for public and restricted areas
+        if metrics['Public Area Pages'] > 0:
+            metrics['Public Average Violations per Page'] = round(metrics['Public Area Violations'] / metrics['Public Area Pages'], 2)
+        else:
+            metrics['Public Average Violations per Page'] = 0
+            
+        if metrics['Restricted Area Pages'] > 0:
+            metrics['Restricted Average Violations per Page'] = round(metrics['Restricted Area Violations'] / metrics['Restricted Area Pages'], 2)
+        else:
+            metrics['Restricted Average Violations per Page'] = 0
+        
+        # Calculate weighted severity
         total_severity = df['severity_score'].sum()
         metrics['Weighted Severity Score'] = round(total_severity / unique_pages, 2) if unique_pages > 0 else 0
+        
+        # Calculate critical pages percentage
         pages_with_critical = df[df['impact'] == 'critical']['normalized_url'].nunique()
         critical_page_pct = (pages_with_critical / unique_pages * 100) if unique_pages > 0 else 0
         metrics['Pages with Critical Issues (%)'] = round(critical_page_pct, 2)
+        
+        # Calculate page type metrics
         page_type_metrics = {}
         for page_type, group in df.groupby('page_type'):
             type_pages = group['normalized_url'].nunique()
@@ -406,6 +451,8 @@ class AccessibilityAnalyzer:
                 'critical_pct': round((group[group['impact'] == 'critical']['normalized_url'].nunique() / type_pages) * 100, 2) if type_pages > 0 else 0
             }
         metrics['Page Type Analysis'] = page_type_metrics
+        
+        # WCAG analysis
         wcag_criteria = df.groupby(['wcag_category', 'wcag_criterion', 'wcag_name']).size().reset_index(name='count')
         wcag_criteria = wcag_criteria.sort_values('count', ascending=False)
         top_wcag = {}
@@ -417,6 +464,8 @@ class AccessibilityAnalyzer:
                 'percentage': round((row['count'] / metrics['Total Violations']) * 100, 2)
             }
         metrics['Top WCAG Issues'] = top_wcag
+        
+        # Calculate conformance scores
         critical_factor = (pages_with_critical / unique_pages) if unique_pages > 0 else 0
         weighted_violation_score = (
             (impact_counts.get('critical', 0) * 4) + 
@@ -427,6 +476,27 @@ class AccessibilityAnalyzer:
         critical_penalty = critical_factor * 20
         conformance_score = max(0, 100 - min(100, (weighted_violation_score * 2 + critical_penalty)))
         metrics['WCAG Conformance Score'] = round(conformance_score, 1)
+        
+        # Calculate separate conformance scores for public and restricted areas
+        for area_type, area_df in [('Public', df_public), ('Restricted', df_restricted)]:
+            if not area_df.empty:
+                area_pages = area_df['normalized_url'].nunique()
+                area_pages_with_critical = area_df[area_df['impact'] == 'critical']['normalized_url'].nunique()
+                area_critical_factor = (area_pages_with_critical / area_pages) if area_pages > 0 else 0
+                
+                area_impact_counts = area_df['impact'].value_counts().to_dict()
+                area_weighted_score = (
+                    (area_impact_counts.get('critical', 0) * 4) + 
+                    (area_impact_counts.get('serious', 0) * 3) + 
+                    (area_impact_counts.get('moderate', 0) * 2) + 
+                    (area_impact_counts.get('minor', 0) * 1)
+                ) / max(area_pages, 1)
+                
+                area_critical_penalty = area_critical_factor * 20
+                area_conformance_score = max(0, 100 - min(100, (area_weighted_score * 2 + area_critical_penalty)))
+                metrics[f'{area_type} WCAG Conformance Score'] = round(area_conformance_score, 1)
+        
+        # Determine conformance level
         if conformance_score >= 95:
             conformance_level = 'AA (Nearly conformant)'
         elif conformance_score >= 85:
@@ -438,9 +508,10 @@ class AccessibilityAnalyzer:
         else:
             conformance_level = 'Non-conformant (Major issues)'
         metrics['WCAG Conformance Level'] = conformance_level
+        
         self.logger.info(f"Calculated advanced metrics for {metrics['Total Violations']} violations across {metrics['Unique Pages']} pages")
         return metrics
-    
+
     def _empty_metrics(self) -> Dict:
         """Return default empty metrics when no data is available."""
         return {

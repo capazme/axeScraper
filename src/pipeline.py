@@ -27,6 +27,8 @@ import traceback
 from utils.config_manager import ConfigurationManager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
+from utils.funnel_manager import FunnelManager
+from axcel.funnel_analysis import FunnelAccessibilityAnalyzer
 
 # Import dei componenti principali
 from axcel.axcel import AxeAnalysis
@@ -511,7 +513,77 @@ class Pipeline:
         except Exception as e:
             self.logger.exception(f"Errore generando report finale: {e}")
             return None
-    
+
+    async def run_funnel_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
+        """
+        Esegue l'analisi accessibilità per funnel specifici.
+        
+        Args:
+            base_url: URL base
+            domain_config: Configurazione del dominio
+            output_manager: Gestore dell'output
+            
+        Returns:
+            True se l'analisi è completata con successo, False altrimenti
+        """
+        self.logger.info(f"Iniziando analisi funnel per {base_url}")
+        
+        # Ottieni la configurazione dei funnel
+        domain_slug = output_manager.domain_slug
+        
+        # Controlla se ci sono funnel definiti per questo dominio
+        funnel_manager = FunnelManager(self.config_manager)
+        domain_funnels = funnel_manager.get_funnels_for_domain(domain_slug)
+        
+        if not domain_funnels:
+            self.logger.info(f"Nessun funnel configurato per il dominio {domain_slug}")
+            return False
+        
+        # Determina i percorsi di output
+        funnel_report_dir = output_manager.get_path("analysis")
+        
+        try:
+            # Ottieni configurazione autenticazione
+            auth_config = domain_config.get("auth_config", {})
+            auth_enabled = auth_config.get("enabled", False)
+            
+            # Crea auth manager se necessario
+            auth_manager = None
+            if auth_enabled:
+                from utils.auth_manager import AuthManager
+                auth_manager = AuthManager.from_config({"auth": {domain_slug: auth_config}})
+            
+            # Crea l'analizzatore di funnel
+            analyzer = FunnelAccessibilityAnalyzer(
+                funnel_manager=funnel_manager,
+                auth_manager=auth_manager,
+                output_manager=output_manager,
+                headless=self.config_manager.get_bool("AXE_HEADLESS", True)
+            )
+            
+            # Esegui l'analisi per ogni funnel
+            funnel_names = list(domain_funnels.keys())
+            self.logger.info(f"Analisi di {len(funnel_names)} funnel per {domain_slug}: {', '.join(funnel_names)}")
+            
+            results = await analyzer.analyze_multiple_funnels(funnel_names)
+            
+            # Genera report per ogni funnel
+            reports = []
+            for funnel_name, result in results.items():
+                report_path = analyzer.generate_excel_report(
+                    funnel_name, 
+                    output_path=str(funnel_report_dir / f"funnel_{funnel_name}_{domain_slug}.xlsx")
+                )
+                if report_path:
+                    reports.append(report_path)
+            
+            self.logger.info(f"Analisi funnel completata per {domain_slug}, generati {len(reports)} report")
+            return len(reports) > 0
+            
+        except Exception as e:
+            self.logger.exception(f"Errore durante l'analisi funnel: {e}")
+            return False
+        
     async def process_url(self, base_url: str) -> Optional[str]:
         """
         Elabora un URL attraverso l'intero pipeline con progressione esplicita e gestione errori.

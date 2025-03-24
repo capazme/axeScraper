@@ -26,7 +26,7 @@ from ..items import PageItem, PageItemLoader
 from ..utils.url_filters import URLFilters
 from ..utils.link_extractor import AdvancedLinkExtractor
 from scrapy_selenium import SeleniumRequest
-
+from selenium import webdriver
 # Import configuration system
 import sys
 import os
@@ -34,6 +34,7 @@ import importlib.util
 try:
     # Try relative import from this package
     from ....utils.config_manager import ConfigurationManager
+    from ....utils.auth_manager import AuthManager, FormAuthenticationStrategy
 except ImportError:
     # If running standalone, try to find the module in the project
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -137,7 +138,12 @@ class MultiDomainSpider(scrapy.Spider):
         if self.respect_robots:
             from scrapy.robotstxt import RobotFileParser
             self.robots_parsers = {}
-        
+        self.auth_enabled = self._get_config_bool('auth_enabled', 'AUTH_ENABLED', kwargs, False)
+        self.auth_domains = set(self._get_config('auth_domains', 'AUTH_DOMAINS', kwargs, []))
+        self.authenticated_domains = set()
+        self.auth_cookies = {}
+        self.auth_driver = None
+
         # Log the configuration settings
         self._log_configuration()
     
@@ -249,9 +255,90 @@ class MultiDomainSpider(scrapy.Spider):
                          f"request_delay={self.request_delay}, "
                          f"selenium_threshold={self.selenium_threshold}")
     
+    def _authenticate(self, domain: str):
+        """
+        Autentica il crawler per un dominio specifico.
+        
+        Args:
+            domain: Dominio da autenticare
+        
+        Returns:
+            True se l'autenticazione ha successo, False altrimenti
+        """
+        # Skip se l'autenticazione non è abilitata
+        if not self.auth_enabled:
+            self.logger.debug(f"Autenticazione non abilitata per {domain}")
+            return False
+        
+        # Skip se il dominio non è nella lista dei domini con autenticazione
+        if self.auth_domains and domain not in self.auth_domains:
+            self.logger.debug(f"Autenticazione non configurata per {domain}")
+            return False
+        
+        # Ottieni configurazione di autenticazione per il dominio
+        auth_config = self.config_manager.get_auth_config(domain)
+        
+        # Skip se la configurazione non è valida
+        if not auth_config.get("enabled", False):
+            self.logger.debug(f"Autenticazione non abilitata per {domain}")
+            return False
+        
+        # Crea la strategia di autenticazione
+        strategy_type = auth_config.get("type", "form")
+        
+        if strategy_type == "form":
+            strategy = FormAuthenticationStrategy(
+                login_url=auth_config.get("login_url", ""),
+                username=auth_config.get("username", ""),
+                password=auth_config.get("password", ""),
+                username_selector=auth_config.get("username_selector", ""),
+                password_selector=auth_config.get("password_selector", ""),
+                submit_selector=auth_config.get("submit_selector", ""),
+                success_indicator=auth_config.get("success_indicator", ""),
+                error_indicator=auth_config.get("error_indicator", ""),
+                pre_login_actions=auth_config.get("pre_login_actions", []),
+                post_login_actions=auth_config.get("post_login_actions", []),
+                timeout=auth_config.get("timeout", 30)
+            )
+            
+            # Autentica con Selenium se la modalità ibrida è abilitata
+            if self.hybrid_mode and self.using_selenium and not self.switch_occurred:
+                # Crea un nuovo driver Selenium se necessario
+                if not hasattr(self, "auth_driver") or self.auth_driver is None:
+                    options = webdriver.ChromeOptions()
+                    options.add_argument("--headless")
+                    options.add_argument("--no-sandbox")
+                    options.add_argument("--disable-dev-shm-usage")
+                    
+                    self.auth_driver = webdriver.Chrome(options=options)
+                
+                # Esegui l'autenticazione
+                success = strategy.authenticate(self.auth_driver)
+                
+                if success:
+                    # Salva i cookies per Scrapy
+                    self.logger.info(f"Autenticazione riuscita per {domain}")
+                    
+                    # Aggiorna lo stato di autenticazione
+                    self.authenticated_domains.add(domain)
+                    
+                    # Ottieni i cookies
+                    cookies = strategy.get_auth_cookies()
+                    
+                    # Memorizza i cookies per essere usati nelle richieste HTTP
+                    self.auth_cookies[domain] = cookies
+                    
+                    return True
+                else:
+                    self.logger.error(f"Autenticazione fallita per {domain}")
+                    return False
+        
+        return False
+    
     def start_requests(self):
         """
         Generate initial requests based on the configured parameters.
+        Includes authentication if enabled.
         
         Yields:
             Request: Requests for each starting URL
@@ -262,6 +349,11 @@ class MultiDomainSpider(scrapy.Spider):
         self.processed_count = 0
         self.domain_counts = {domain: 0 for domain in self.domains}
         
+        # Authenticate for each domain if enabled
+        if self.auth_enabled:
+            for domain in self.domains:
+                self._authenticate(domain)
+        
         # Verify starting URLs
         if not self.start_urls:
             self.logger.error("No starting URLs defined!")
@@ -271,13 +363,20 @@ class MultiDomainSpider(scrapy.Spider):
         for url in self.start_urls:
             self.logger.info(f"Requesting initial URL: {url}")
             
+            # Get domain for this URL
+            domain = URLFilters.get_domain(url)
+            
             # Use Selenium or HTTP based on configuration
             if self.hybrid_mode and self.using_selenium:
                 yield self.make_selenium_request(url, self.parse)
             else:
+                # Add auth cookies if authenticated for this domain
+                cookies = self.auth_cookies.get(domain, [])
+                
                 yield Request(
                     url=url, 
                     callback=self.parse,
+                    cookies={c['name']: c['value'] for c in cookies if 'name' in c and 'value' in c},
                     meta={
                         'dont_redirect': False, 
                         'handle_httpstatus_list': [301, 302],
@@ -285,7 +384,7 @@ class MultiDomainSpider(scrapy.Spider):
                     },
                     errback=self.errback_httpbin
                 )
-    
+                
     def is_public_page(self, url):
         """
         Determine if a URL represents a public page that should be crawled.
@@ -584,12 +683,19 @@ class MultiDomainSpider(scrapy.Spider):
             if not url:
                 return None
             
+            # Get domain for authentication cookies
+            domain = URLFilters.get_domain(url)
+            
             # Prepare meta data
             meta = {
                 'selenium': True,
                 'referer': referer,
                 'depth': depth
             }
+            
+            # Add authenticated flag if domain is authenticated
+            if domain in self.authenticated_domains:
+                meta['authenticated'] = True
             
             # JavaScript to execute
             js_script = """
@@ -610,6 +716,7 @@ class MultiDomainSpider(scrapy.Spider):
                         }
                     }
                     
+                    // Click "load more" buttons
                     // Click "load more" buttons
                     var loadMoreBtns = document.querySelectorAll(
                         "button:contains('Load more'), button:contains('Show more'), " +
@@ -634,6 +741,23 @@ class MultiDomainSpider(scrapy.Spider):
                 }
             """
             
+            # Add auth cookie preparation script if domain is authenticated
+            if domain in self.authenticated_domains and domain in self.auth_cookies:
+                cookies_js = """
+                // Add auth cookies
+                try {
+                    const cookies = %s;
+                    for (const cookie of cookies) {
+                        document.cookie = `${cookie.name}=${cookie.value}; path=${cookie.path || '/'}`;
+                        console.log(`Added cookie: ${cookie.name}`);
+                    }
+                } catch(e) {
+                    console.error('Error adding cookies:', e);
+                }
+                """ % json.dumps(self.auth_cookies[domain])
+                
+                js_script = cookies_js + js_script
+            
             return SeleniumRequest(
                 url=url,
                 callback=callback,
@@ -646,7 +770,7 @@ class MultiDomainSpider(scrapy.Spider):
         except Exception as e:
             self.logger.error(f"Error creating Selenium request for {url}: {e}")
             return None
-    
+                
     def _extract_page_item(self, response):
         """
         Extract page data into a structured item.

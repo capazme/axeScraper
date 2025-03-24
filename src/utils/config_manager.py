@@ -100,7 +100,68 @@ DEFAULT_CONFIG_SCHEMA = {
         "type": "path",
         "default": "~/axeScraper/output",
         "description": "Directory di base per l'output"
-    }
+    },
+    "AUTH_ENABLED": {
+    "type": "bool",
+    "default": False,
+    "description": "Abilita l'autenticazione per aree riservate",
+    "aliases": ["auth_enabled"]
+    },
+    "AUTH_STRATEGY": {
+        "type": "str",
+        "default": "form",
+        "description": "Strategia di autenticazione (form, token, cookie)",
+        "allowed_values": ["form", "token", "cookie"],
+        "aliases": ["auth_strategy"]
+    },
+    "AUTH_LOGIN_URL": {
+        "type": "str",
+        "default": "",
+        "description": "URL della pagina di login",
+        "aliases": ["login_url"]
+    },
+    "AUTH_USERNAME": {
+        "type": "str",
+        "default": "",
+        "description": "Username o email per l'autenticazione",
+        "aliases": ["username"]
+    },
+    "AUTH_PASSWORD": {
+        "type": "str",
+        "default": "",
+        "description": "Password per l'autenticazione",
+        "aliases": ["password"]
+    },
+    "AUTH_USERNAME_SELECTOR": {
+        "type": "str",
+        "default": "",
+        "description": "Selettore CSS per il campo username",
+        "aliases": ["username_selector"]
+    },
+    "AUTH_PASSWORD_SELECTOR": {
+        "type": "str",
+        "default": "",
+        "description": "Selettore CSS per il campo password",
+        "aliases": ["password_selector"]
+    },
+    "AUTH_SUBMIT_SELECTOR": {
+        "type": "str",
+        "default": "",
+        "description": "Selettore CSS per il bottone di submit",
+        "aliases": ["submit_selector"]
+    },
+    "AUTH_SUCCESS_INDICATOR": {
+        "type": "str",
+        "default": "",
+        "description": "Selettore CSS che indica login riuscito",
+        "aliases": ["success_indicator"]
+    },
+    "AUTH_ERROR_INDICATOR": {
+        "type": "str",
+        "default": "",
+        "description": "Selettore CSS che indica login fallito",
+        "aliases": ["error_indicator"]
+    },
 }
 
 class ConfigurationManager:
@@ -165,6 +226,58 @@ class ConfigurationManager:
         self.logger.info(f"ConfigurationManager inizializzato: {project_name}")
         self.logger.info(f"File configurazione: {self.config_file}")
     
+    def get_auth_config(self, domain: str = None) -> Dict[str, Any]:
+        """
+        Ottiene la configurazione di autenticazione per un dominio.
+        
+        Args:
+            domain: Dominio per cui ottenere la configurazione
+            
+        Returns:
+            Configurazione di autenticazione
+        """
+        # Get auth enabled flag
+        auth_enabled = self.get_bool("AUTH_ENABLED", False)
+        
+        if not auth_enabled:
+            return {"enabled": False}
+        
+        # Get auth strategy
+        strategy = self.get("AUTH_STRATEGY", "form")
+        
+        # Base auth config
+        auth_config = {
+            "enabled": auth_enabled,
+            "type": strategy,
+        }
+        
+        # Add strategy-specific configs
+        if strategy == "form":
+            auth_config.update({
+                "login_url": self.get("AUTH_LOGIN_URL", ""),
+                "username": self.get("AUTH_USERNAME", ""),
+                "password": self.get("AUTH_PASSWORD", ""),
+                "username_selector": self.get("AUTH_USERNAME_SELECTOR", ""),
+                "password_selector": self.get("AUTH_PASSWORD_SELECTOR", ""),
+                "submit_selector": self.get("AUTH_SUBMIT_SELECTOR", ""),
+                "success_indicator": self.get("AUTH_SUCCESS_INDICATOR", ""),
+                "error_indicator": self.get("AUTH_ERROR_INDICATOR", ""),
+                "pre_login_actions": self.get_nested("AUTH_PRE_LOGIN_ACTIONS", []),
+                "post_login_actions": self.get_nested("AUTH_POST_LOGIN_ACTIONS", []),
+                "timeout": self.get_int("AUTH_TIMEOUT", 30)
+            })
+        
+        # Check domain-specific auth config if domain is provided
+        if domain:
+            domain_key = self.domain_to_slug(domain)
+            domain_auth = self.get_nested(f"AUTH_DOMAINS.{domain_key}", {})
+            
+            # Override with domain-specific config if available
+            if domain_auth:
+                auth_config.update(domain_auth)
+        
+        return auth_config
+
     def _build_alias_mapping(self) -> Dict[str, str]:
         """Costruisce un mapping da alias a chiavi standard"""
         aliases = {}

@@ -10,6 +10,7 @@ Compatible with output from multi_domain_crawler.
 """
 
 import asyncio
+from datetime import time
 import re
 import logging
 import tempfile
@@ -28,6 +29,7 @@ from axe_selenium_python import Axe
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.common.by import By
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from .excel_report import rename_headers
@@ -36,6 +38,8 @@ from .excel_report import rename_headers
 from utils.config_manager import ConfigurationManager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
+from utils.auth_manager import AuthManager, FormAuthenticationStrategy
+from .url_filters import URLFilters
 
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")
@@ -398,7 +402,8 @@ class AxeAnalysis:
         headless: bool = None,
         resume: bool = None,
         output_folder: str = None,
-        output_manager = None
+        output_manager = None,
+        auth_enabled: bool = None
     ) -> None:
         """
         Initialize the accessibility analysis on representative URLs for templates.
@@ -415,6 +420,9 @@ class AxeAnalysis:
         self.headless = headless if headless is not None else self.config.get("headless", True)
         self.resume = resume if resume is not None else self.config.get("resume", True)
         
+        # Initialize authentication settings
+        self.auth_enabled = auth_enabled if auth_enabled is not None else config_manager.get_bool("AUTH_ENABLED", False)
+
         # First look for URLs from the multi-domain crawler (one URL per template)
         if urls is None and crawler_output_dir:
             urls = load_urls_from_multi_domain_output(
@@ -431,6 +439,45 @@ class AxeAnalysis:
             
         self.all_urls = set(urls)
         logger.info(f"{len(self.all_urls)} representative URLs will be analyzed.")
+
+        # Extract domains from URLs
+        self.allowed_domains = set()
+        if domains:
+            # Parse domains parameter if provided
+            if isinstance(domains, str):
+                self.allowed_domains = set(d.strip() for d in domains.split(','))
+            elif isinstance(domains, list):
+                self.allowed_domains = set(domains)
+        else:
+            # Extract domains from all_urls
+            for url in self.all_urls:
+                try:
+                    parsed = urlparse(url)
+                    domain = parsed.netloc.replace('www.', '')
+                    if domain:
+                        self.allowed_domains.add(domain)
+                except Exception:
+                    pass
+        
+        logger.info(f"Domains to analyze: {', '.join(self.allowed_domains)}")
+
+        # Initialize auth manager if authentication is enabled
+        self.auth_manager = None
+        if self.auth_enabled and self.allowed_domains:
+            logger.info("Authentication enabled for Axe analysis")
+            # Initialize auth manager
+            auth_config = {}
+            
+            # Get configurations for domains
+            for domain in self.allowed_domains:
+                if hasattr(config_manager, 'get_auth_config'):
+                    domain_config = config_manager.get_auth_config(domain)
+                    if domain_config.get("enabled", False):
+                        auth_config[domain] = domain_config
+            
+            if auth_config:
+                self.auth_manager = AuthManager.from_config({"auth": auth_config})
+                logger.info(f"Auth manager initialized with {len(auth_config)} domains")
 
         # Determine paths from output manager if available
         if self.output_manager:
@@ -536,6 +583,29 @@ class AxeAnalysis:
         logger.info(f"Starting analysis: {url}")
         driver = await driver_pool.get()
         try:
+            # Authenticate if enabled
+            domain = URLFilters.get_domain(url)
+            authenticated = False
+            
+            if self.auth_enabled and self.auth_manager and domain in self.allowed_domains:
+                try:
+                    logger.info(f"Tentativo di autenticazione per il dominio: {domain}")
+                    authenticated = self.auth_manager.authenticate(domain, driver)
+                    if authenticated:
+                        logger.info(f"Autenticazione riuscita per il dominio: {domain}")
+                        # Aggiungi attributo se non esiste
+                        if not hasattr(driver, 'authenticated_domains'):
+                            driver.authenticated_domains = set()
+                        driver.authenticated_domains.add(domain)
+                    else:
+                        logger.warning(f"Autenticazione fallita per il dominio: {domain}")
+                except Exception as e:
+                    logger.error(f"Errore durante l'autenticazione per {domain}: {e}")
+            
+            # Set area type based on authentication status
+            area_type = "restricted" if authenticated else "public"
+            logger.info(f"Analysis for {url} with area_type: {area_type}")
+            
             await asyncio.to_thread(robust_driver_get, driver, url)
             await asyncio.sleep(self.sleep_time)
             axe = Axe(driver)
@@ -550,6 +620,8 @@ class AxeAnalysis:
                         results = {"violations": []}
                     else:
                         await asyncio.sleep(5)
+            
+            # Resto del codice per l'elaborazione dei risultati
             issues = []
             for violation in results.get("violations", []):
                 for node in violation.get("nodes", []):
@@ -561,11 +633,12 @@ class AxeAnalysis:
                         "help": violation.get("help", ""),
                         "target": ", ".join([", ".join(x) if isinstance(x, list) else x for x in node.get("target", [])]),
                         "html": node.get("html", ""),
-                        "failure_summary": node.get("failureSummary", "")
+                        "failure_summary": node.get("failureSummary", ""),
+                        "area_type": area_type  # Aggiungi area_type ai risultati
                     }
                     issues.append(issue)
             self.results[url] = issues
-            logger.info(f"{url}: {len(issues)} issues found.")
+            logger.info(f"{url}: {len(issues)} issues found in {area_type} area.")
             self.visited.add(url)
             self.processed_count += 1
             if self.processed_count % AUTO_SAVE_INTERVAL == 0:
@@ -575,20 +648,117 @@ class AxeAnalysis:
         finally:
             # Release the driver back to the pool for reuse
             await driver_pool.put(driver)
+        
+    async def explore_restricted_area(self, domain: str, driver: webdriver.Chrome) -> list[str]:
+        """Explore restricted area of a domain to find all pages to analyze."""
+        logger.info(f"Exploring restricted area for {domain}")
+        
+        auth_config = None
+        if hasattr(config_manager, 'get_auth_config'):
+            auth_config = config_manager.get_auth_config(domain)
+        
+        if not auth_config or not auth_config.get("enabled", False):
+            logger.warning(f"Authentication not enabled for {domain}, cannot explore restricted area")
+            return []
+        
+        restricted_patterns = config_manager.get_list("RESTRICTED_AREA_PATTERNS", [])
+        domain_config = config_manager.get_nested(f"AUTH_DOMAINS.{domain}", {})
+        restricted_urls = domain_config.get("restricted_urls", [])
+        
+        restricted_area_base = "https://www.locautorent.com/it/mylocauto/"
+        
+        if not hasattr(driver, 'authenticated_domains') or domain not in driver.authenticated_domains:
+            authenticated = self.auth_manager.authenticate(domain, driver)
+            if not authenticated:
+                logger.error(f"Authentication failed for {domain}, cannot explore restricted area")
+                return restricted_urls
+            driver.authenticated_domains.add(domain)
+        
+        found_urls = set(restricted_urls)
+        
+        try:
+            logger.info(f"Navigating to restricted area: {restricted_area_base}")
+            driver.get(restricted_area_base)
+            time.sleep(3)
+            
+            links = driver.find_elements(By.TAG_NAME, "a")
+            for link in links:
+                try:
+                    href = link.get_attribute("href")
+                    if href and href.startswith(restricted_area_base):
+                        found_urls.add(href)
+                        logger.debug(f"Found restricted area link: {href}")
+                except Exception as e:
+                    logger.debug(f"Error extracting link: {e}")
+            
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for button in buttons:
+                try:
+                    onclick = button.get_attribute("onclick")
+                    data_href = button.get_attribute("data-href")
+                    data_target = button.get_attribute("data-target")
+                    
+                    if onclick and "location.href" in onclick:
+                        match = re.search(r"location\.href\s*=\s*['\"]([^'\"]+)['\"]", onclick)
+                        if match and match.group(1).startswith(restricted_area_base):
+                            found_urls.add(match.group(1))
+                    elif data_href and data_href.startswith(restricted_area_base):
+                        found_urls.add(data_href)
+                    elif data_target and data_target.startswith(restricted_area_base):
+                        found_urls.add(data_target)
+                except Exception as e:
+                    logger.debug(f"Error extracting button info: {e}")
+            
+            locauto_sections = [
+                "#/prenotazioni",
+                "#/profilo", 
+                "#/fatture",
+                "#/documenti",
+                "#/preferenze"
+            ]
+            
+            for section in locauto_sections:
+                found_urls.add(f"{restricted_area_base}{section}")
+            
+            logger.info(f"Found {len(found_urls)} URLs in restricted area of {domain}")
+            return list(found_urls)
+        except Exception as e:
+            logger.error(f"Error exploring restricted area: {e}")
+            return list(found_urls)
 
     async def run(self) -> None:
-        """Process all pending URLs using the driver pool."""
+        """Process all pending URLs using the driver pool, including restricted area pages."""
         if not self.pending_urls:
             logger.warning("No URLs to analyze!")
             return
             
         driver_pool = await self._init_driver_pool()
+        
+        if self.auth_enabled and self.auth_manager:
+            restricted_urls = set()
+            explore_driver = await driver_pool.get()
+            
+            try:
+                for domain in self.allowed_domains:
+                    domain_config = config_manager.get_nested(f"AUTH_DOMAINS.{domain}", {})
+                    if domain_config.get("explore_restricted_area", False):
+                        domain_restricted_urls = await self.explore_restricted_area(domain, explore_driver)
+                        restricted_urls.update(domain_restricted_urls)
+                        logger.info(f"Added {len(domain_restricted_urls)} restricted area URLs for {domain}")
+            finally:
+                await driver_pool.put(explore_driver)
+            
+            if restricted_urls:
+                restricted_to_process = restricted_urls - self.visited
+                self.pending_urls.extend(restricted_to_process)
+                logger.info(f"Added {len(restricted_to_process)} new restricted area URLs to analyze")
+        
         tasks = [asyncio.create_task(self.process_url(url, driver_pool))
                  for url in self.pending_urls]
         logger.info(f"Starting {len(tasks)} analysis tasks...")
         await asyncio.gather(*tasks, return_exceptions=True)
         self._save_visited()
-        # Close all drivers in the pool
+        
         while not driver_pool.empty():
             driver = await driver_pool.get()
             await asyncio.to_thread(driver.quit)
