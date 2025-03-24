@@ -162,6 +162,11 @@ DEFAULT_CONFIG_SCHEMA = {
         "description": "Selettore CSS che indica login fallito",
         "aliases": ["error_indicator"]
     },
+    "FUNNELS": {
+    "type": "dict",
+    "default": {},
+    "description": "Definizione dei funnel di navigazione per l'analisi di accessibilità"
+    }
 }
 
 class ConfigurationManager:

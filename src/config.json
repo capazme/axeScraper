@@ -3,14 +3,14 @@
     "https://www.locautorent.com/"
   ],
   "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
-  "START_STAGE": "crawler",
+  "START_STAGE": "axe",
   "REPEAT_ANALYSIS": 1,
   "RESOURCE_MONITORING": true,
   "RESOURCE_CHECK_INTERVAL": 5,
   "CPU_THRESHOLD": 85,
   "MEMORY_THRESHOLD": 80,
   "COOL_DOWN_TIME": 10,
-
+  "FUNNEL_ANALYSIS_ENABLED": true,
   "AUTH_ENABLED": true,
   "AUTH_STRATEGY": "form",
   "AUTH_LOGIN_URL": "https://www.locautorent.com/it/mylocauto/?int_source=header&int_medium=cta&int_campaign=mylocauto#/auth/login",
@@ -36,62 +36,134 @@
     "locautorent_com": {
       "restricted_urls": [
         "https://www.locautorent.com/it/mylocauto/",
-        "https://www.locautorent.com/it/mylocauto/#/dashboard/edit-profile"
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/my-locauto",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/edit-profile",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/profile",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/account",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/register-booking",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/new-trips",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/rentals",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
       ],
       "explore_restricted_area": true
     }
   },
 
   "RESTRICTED_AREA_PATTERNS": [
-    "https://www.locautorent.com/it/mylocauto/"
+  "/mylocauto/"            
   ],
 
-  "FUNNELS": {
-    "locauto_rental_flow": {
-      "description": "Processo completo di prenotazione auto su Locauto",
-      "domain": "locautorent_com",
-      "auth_required": true,
-      "steps": [
-        {
-          "name": "HomePage",
-          "url": "https://www.locautorent.com/it/",
-          "wait_for_selector": ".home-container",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "wait", "seconds": 2}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "selector": ".search-box"
-          }
+
+"FUNNELS": {
+  "locauto_prenotazione_auto": {
+    "description": "Processo completo di prenotazione auto su Locauto con ricerca, selezione veicolo e completamento",
+    "domain": "locautorent_com",
+    "auth_required": true,
+    "steps": [
+      {
+        "name": "Homepage",
+        "url": "https://www.locautorent.com/it/",
+        "wait_for_selector": ".home-container",
+        "actions": [
+          {"type": "cookie_banner"},
+          {"type": "wait", "seconds": 3}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#form-field-pickup_pos_id"
+        }
+      },
+      {
+        "name": "InserimentoLocalita",
+        "actions": [
+          {"type": "input", "selector": "#form-field-pickup_pos_id", "value": "Napoli Aeroporto"},
+          {"type": "wait", "seconds": 3}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#form-field-pickup_pos_id-listbox-item-0 > span"
+        }
+      },
+      {
+        "name": "SelezioneLocalita",
+        "actions": [
+          {"type": "click", "selector": "#form-field-pickup_pos_id-listbox-item-0 > span"},
+          {"type": "wait", "seconds": 2}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div.row.gx-xs > div.col-12.col-md-6.d-flex.flex-column.flex-md-row.row-gap-sm.column-gap-xs.pt-sm > div > button"
+        }
+      },
+      {
+        "name": "CliccaCerca",
+        "actions": [
+          {"type": "click", "selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div.row.gx-xs > div.col-12.col-md-6.d-flex.flex-column.flex-md-row.row-gap-sm.column-gap-xs.pt-sm > div > button"},
+          {"type": "wait", "seconds": 5}
+        ],
+        "success_condition": {
+          "type": "url_contains",
+          "text": "selectedVehicleType"
+        }
+      },
+      {
+        "name": "SelezioneVeicolo",
+        "actions": [
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "prima-selezione-veicolo.png"},
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"},
+          {"type": "wait", "seconds": 4}
+        ],
+        "timeout": 45
+      },
+      {
+        "name": "SceltaPianoCopertura",
+        "actions": [
+          {"type": "wait", "seconds": 3},
+          {"type": "screenshot", "filename": "prima-piano-copertura.png"},
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"},
+          {"type": "wait", "seconds": 3}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button > span"
         },
-        {
-          "name": "LoginPage",
-          "url": "https://www.locautorent.com/it/mylocauto/?int_source=header&int_medium=cta&int_campaign=mylocauto#/auth/login",
-          "wait_for_selector": "input[type='email']",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "wait", "seconds": 2},
-            {"type": "input", "selector": "input[type='email']", "value": "tuo_username@example.com"},
-            {"type": "input", "selector": "input[type='password']", "value": "tua_password"},
-            {"type": "script", "code": "document.querySelector('.submitCta').click();"},
-            {"type": "wait", "seconds": 3}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "selector": ".mylocauto-user-info"
-          }
-        }      ]
-    },
-    "locauto_myaccount_flow": {
-      "description": "Verifica dati personali nell'area Account",
-      "domain": "locautorent_com",
-      "auth_required": true,
-      "steps": [
-      ]
-    }
-  },
-  
+        "timeout": 45
+      },
+      {
+        "name": "ContinuaPrenotazione",
+        "actions": [
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button > span"},
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "modulo-finale.png"}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#booking-end-complete-anchor-target > form"
+        },
+        "timeout": 45
+      },
+      {
+        "name": "CompletamentoPrenotazione",
+        "actions": [
+          {"type": "wait", "seconds": 3},
+          {"type": "click", "selector": "#booking-end-complete-anchor-target > form > div > div:nth-child(7) > div > div > div > label"},
+          {"type": "wait", "seconds": 2},
+          {"type": "screenshot", "filename": "prima-invio-finale.png"},
+          {"type": "click", "selector": "#booking-end-complete-anchor-target > form > div > div:nth-child(8) > div > div > button"},
+          {"type": "wait", "seconds": 5}
+        ],
+        "success_condition": {
+          "type": "url_contains",
+          "text": "confirmation"
+        },
+        "timeout": 60
+      }
+    ]
+  }
+},
+
+
   "LOG_DIR":"home/ec2-user/axeScraper/output/logs",
   "LOG_LEVEL": "INFO",
   "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",

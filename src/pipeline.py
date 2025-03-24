@@ -570,19 +570,44 @@ class Pipeline:
             # Genera report per ogni funnel
             reports = []
             for funnel_name, result in results.items():
-                report_path = analyzer.generate_excel_report(
+                # Genera percorso report con timestamp
+                report_path = str(output_manager.get_timestamped_path(
+                    "analysis", 
+                    f"funnel_{funnel_name}_{domain_slug}", 
+                    "xlsx"
+                ))
+                
+                # Genera il report Excel
+                excel_report = analyzer.generate_excel_report(
                     funnel_name, 
-                    output_path=str(funnel_report_dir / f"funnel_{funnel_name}_{domain_slug}.xlsx")
+                    output_path=report_path
                 )
-                if report_path:
-                    reports.append(report_path)
+                
+                if excel_report:
+                    reports.append(excel_report)
             
-            self.logger.info(f"Analisi funnel completata per {domain_slug}, generati {len(reports)} report")
-            return len(reports) > 0
-            
+            # Verifica se sono stati generati report
+            if reports:
+                self.logger.info(f"Analisi funnel completata per {domain_slug}, generati {len(reports)} report")
+                # Opzionale: genera un report consolidato o sommario
+                coverage_report = analyzer.get_funnel_coverage_report(results)
+                if coverage_report:
+                    coverage_path = str(output_manager.get_timestamped_path(
+                        "analysis", 
+                        f"funnel_coverage_{domain_slug}", 
+                        "xlsx"
+                    ))
+                    coverage_report.to_excel(coverage_path, index=False)
+                    self.logger.info(f"Report di copertura funnel generato: {coverage_path}")
+                
+                return True
+            else:
+                self.logger.warning(f"Nessun report generato per i funnel di {domain_slug}")
+                return False
+                
         except Exception as e:
-            self.logger.exception(f"Errore durante l'analisi funnel: {e}")
-            return False
+            self.logger.exception(f"Errore durante l'analisi funnel per {base_url}: {e}")
+            return False    
         
     async def process_url(self, base_url: str) -> Optional[str]:
         """
@@ -616,6 +641,7 @@ class Pipeline:
         # Ottieni configurazione pipeline con chiavi standardizzate
         start_stage = self.pipeline_config.get("start_stage") or self.config_manager.get("START_STAGE", "crawler")
         repeat_axe = self.pipeline_config.get("repeat_axe") or self.config_manager.get_int("REPEAT_ANALYSIS", 1)
+        run_funnel_analysis = self.config_manager.get_bool("FUNNEL_ANALYSIS_ENABLED", False)
         
         # Log configurazione per debug
         self.logger.info(f"Pipeline config: START_STAGE={start_stage}, REPEAT_ANALYSIS={repeat_axe}")
@@ -677,16 +703,31 @@ class Pipeline:
                 
                 if report_path:
                     self.logger.info(f"Report finale generato per {base_url}: {report_path}")
-                    return report_path
+                    report_path = report_path
                 else:
                     self.logger.error(f"Impossibile generare report finale per {base_url}")
-                    return None
+                    report_path = None
             except Exception as e:
                 self.logger.exception(f"Errore non gestito in fase report finale: {e}")
-                return None
+                report_path = None
         else:
             self.logger.warning(f"Interruzione richiesta prima della fase report finale per {base_url}")
-            return None
+            report_path = None
+        
+        # Esegui analisi funnel se abilitata
+        if not self.shutdown_flag and run_funnel_analysis:
+            try:
+                self.logger.info(f"Avvio analisi funnel per {base_url}")
+                funnel_success = await self.run_funnel_analysis(base_url, domain_config, output_manager)
+                
+                if funnel_success:
+                    self.logger.info(f"Analisi funnel completata con successo per {base_url}")
+                else:
+                    self.logger.warning(f"Analisi funnel fallita per {base_url}")
+            except Exception as e:
+                self.logger.exception(f"Errore durante l'analisi funnel per {base_url}: {e}")
+        
+        return report_path  # Restituisce il percorso del report principale
     
     async def process_all_urls(self) -> List[str]:
         """
