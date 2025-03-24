@@ -7,6 +7,7 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, TypeVar, Set, Callable
 import datetime
+from utils.config_schema_additions import CONFIG_SCHEMA_ADDITIONS
 
 T = TypeVar('T')
 
@@ -132,8 +133,14 @@ class ConfigurationManager:
         self.config_file = self._find_config_file(config_file)
         self.cli_args = cli_args or {}
         
-        # Inizializza schema di configurazione
-        self.config_schema = config_schema or DEFAULT_CONFIG_SCHEMA
+        # Initialize schema with default schema and additions
+        base_schema = DEFAULT_CONFIG_SCHEMA.copy()
+        
+        # Add authentication and funnel schema
+        base_schema.update(CONFIG_SCHEMA_ADDITIONS)
+        
+        # Use custom schema if provided, otherwise use the enhanced base schema
+        self.config_schema = config_schema or base_schema
         
         # Alias mapping
         self.aliases = self._build_alias_mapping()

@@ -19,7 +19,7 @@ import signal
 import time
 import psutil
 import subprocess
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional, Set, Tuple
 from pathlib import Path
 import traceback
 
@@ -27,6 +27,8 @@ import traceback
 from utils.config_manager import ConfigurationManager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
+from utils.auth_manager import AuthenticationManager
+from utils.funnel_manager import FunnelManager
 
 # Import dei componenti principali
 from axcel.axcel import AxeAnalysis
@@ -99,6 +101,10 @@ class Pipeline:
         self.logger.info(f"AXE_MAX_TEMPLATES: {self.config_manager.get_int('AXE_MAX_TEMPLATES')}")
         self.logger.info(f"START_STAGE: {self.config_manager.get('START_STAGE')}")
         self.logger.info(f"REPEAT_ANALYSIS: {self.config_manager.get_int('REPEAT_ANALYSIS')}")
+        
+        # Initialize auth and funnel managers
+        self.auth_manager = None
+        self.funnel_manager = None
             
     def _handle_shutdown(self, signum, _):
         """Gestisce i segnali di interruzione con pulizia ordinata."""
@@ -512,6 +518,160 @@ class Pipeline:
             self.logger.exception(f"Errore generando report finale: {e}")
             return None
     
+    async def run_authentication(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
+        """Perform authentication for a domain."""
+        self.logger.info(f"Initializing authentication for {base_url}")
+        
+        if not self.config_manager.get_bool("AUTH_ENABLED", False):
+            self.logger.info(f"Authentication disabled for {base_url}")
+            return False
+            
+        try:
+            self.auth_manager = AuthenticationManager(
+                config_manager=self.config_manager,
+                domain=base_url,
+                output_manager=output_manager
+            )
+            
+            success = self.auth_manager.login()
+            
+            if success:
+                self.logger.info(f"Authentication successful for {base_url}")
+                authenticated_urls = self.auth_manager.collect_authenticated_urls()
+                self.logger.info(f"Collected {len(authenticated_urls)} authenticated URLs for analysis")
+            else:
+                self.logger.error(f"Authentication failed for {base_url}")
+                
+            return success
+        except Exception as e:
+            self.logger.exception(f"Error in authentication: {e}")
+            return False
+
+    async def run_funnel_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Dict[str, List[Tuple[str, str, bool]]]:
+        """Run funnel analysis for a domain."""
+        self.logger.info(f"Running funnel analysis for {base_url}")
+        
+        if not self.config_manager.get_bool("FUNNEL_ANALYSIS_ENABLED", False):
+            self.logger.info(f"Funnel analysis disabled for {base_url}")
+            return {}
+            
+        results = {}
+        
+        try:
+            self.funnel_manager = FunnelManager(
+                config_manager=self.config_manager,
+                domain=base_url,
+                output_manager=output_manager,
+                auth_manager=self.auth_manager
+            )
+            
+            domain_slug = self.config_manager.domain_to_slug(base_url)
+            available_funnels = self.funnel_manager.get_available_funnels(domain_slug)
+            
+            if not available_funnels:
+                self.logger.info(f"No funnels defined for {base_url}")
+                return {}
+                
+            self.logger.info(f"Found {len(available_funnels)} funnels for {base_url}")
+            
+            for funnel_id in available_funnels:
+                if self.shutdown_flag:
+                    break
+                    
+                self.logger.info(f"Executing funnel: {funnel_id}")
+                funnel_results = self.funnel_manager.execute_funnel(funnel_id)
+                results[funnel_id] = funnel_results
+                
+                success_count = sum(1 for _, _, success in funnel_results if success)
+                total_steps = len(funnel_results)
+                self.logger.info(f"Funnel {funnel_id}: {success_count}/{total_steps} steps successful")
+            
+            return results
+            
+        except Exception as e:
+            self.logger.exception(f"Error in funnel analysis: {e}")
+            return {}
+        finally:
+            if self.funnel_manager:
+                self.funnel_manager.close()
+
+    async def run_axe_analysis_on_urls(
+        self, 
+        base_url: str, 
+        domain_config: Dict[str, Any], 
+        output_manager: OutputManager,
+        urls: List[str],
+        auth_manager = None
+    ) -> bool:
+        """Run Axe analysis on specific URLs."""
+        self.logger.info(f"Avvio analisi Axe su URL specifici per {base_url}")
+        
+        # Ottieni configurazione axe
+        axe_config = domain_config.get("axe_config", {})
+        
+        # Definisci percorsi aggiuntivi tramite output manager
+        excel_filename = str(output_manager.get_path(
+            "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
+        visited_file = str(output_manager.get_path(
+            "axe", f"visited_urls_{output_manager.domain_slug}.txt"))
+        
+        # Assicura che le directory esistano
+        output_manager.ensure_path_exists("axe")
+        
+        # Ottieni i valori configurazione dalle chiavi standardizzate
+        max_templates = axe_config.get('max_templates_per_domain', 
+                                self.config_manager.get_int("AXE_MAX_TEMPLATES", 50))
+        pool_size = axe_config.get('pool_size', 
+                            self.config_manager.get_int("AXE_POOL_SIZE", 5))
+        sleep_time = axe_config.get('sleep_time', 
+                            self.config_manager.get_float("AXE_SLEEP_TIME", 1.0))
+        headless = axe_config.get('headless', 
+                            self.config_manager.get_bool("AXE_HEADLESS", True))
+        resume = axe_config.get('resume', 
+                        self.config_manager.get_bool("AXE_RESUME", True))
+        
+        # Log configurazione con chiavi standardizzate
+        self.logger.info(f"Configurazione Axe Analysis:")
+        self.logger.info(f"AXE_MAX_TEMPLATES: {max_templates}")
+        self.logger.info(f"AXE_POOL_SIZE: {pool_size}")
+        self.logger.info(f"AXE_SLEEP_TIME: {sleep_time}")
+        self.logger.info(f"AXE_HEADLESS: {headless}")
+        self.logger.info(f"AXE_RESUME: {resume}")
+        
+        try:
+            # Crea analyzer con percorsi standardizzati
+            analyzer = AxeAnalysis(
+                urls=urls,
+                analysis_state_file=None,
+                domains=axe_config.get("domains"),
+                max_templates_per_domain=max_templates,  # Usa il valore standardizzato
+                fallback_urls=[],
+                pool_size=pool_size,  # Usa il valore standardizzato
+                sleep_time=sleep_time,  # Usa il valore standardizzato
+                excel_filename=excel_filename,
+                visited_file=visited_file,
+                headless=headless,  # Usa il valore standardizzato
+                resume=resume,  # Usa il valore standardizzato
+                output_folder=str(output_manager.get_path("axe")),
+                output_manager=output_manager,
+                auth_manager=auth_manager
+            )
+            
+            # Esegui analisi in un thread per evitare blocco asyncio
+            await asyncio.to_thread(analyzer.start)
+            
+            # Verifica output creato
+            if os.path.exists(excel_filename):
+                self.logger.info(f"Analisi Axe completata con successo per {base_url}")
+                return True
+            else:
+                self.logger.error(f"Analisi Axe non ha prodotto output per {base_url}")
+                return False
+                
+        except Exception as e:
+            self.logger.exception(f"Errore in analisi Axe: {e}")
+            return False
+
     async def process_url(self, base_url: str) -> Optional[str]:
         """
         Elabora un URL attraverso l'intero pipeline con progressione esplicita e gestione errori.
@@ -567,8 +727,29 @@ class Pipeline:
         else:
             self.logger.info(f"Salto fase crawler per {base_url} (partenza da {start_stage})")
         
-        # Esegui analisi Axe se iniziamo da crawler o axe
-        if start_stage in ["crawler", "axe"]:
+        # Run authentication if needed
+        auth_success = False
+        authenticated_urls = []
+        if start_stage in ["crawler", "auth", "axe"]:
+            auth_success = await self.run_authentication(base_url, domain_config, output_manager)
+            if auth_success and self.auth_manager:
+                authenticated_urls = self.auth_manager.authenticated_urls
+                self.logger.info(f"Authentication successful, {len(authenticated_urls)} URLs available")
+
+        # Run funnel analysis if enabled
+        funnel_results = {}
+        funnel_urls = []
+        if start_stage in ["crawler", "auth", "axe", "funnel"]:
+            funnel_results = await self.run_funnel_analysis(base_url, domain_config, output_manager)
+            if self.funnel_manager:
+                funnel_urls = self.funnel_manager.get_all_visited_urls()
+                self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
+
+        # Combine special URLs
+        special_urls = list(set(authenticated_urls + funnel_urls))
+
+        # Run standard and special URL analysis
+        if start_stage in ["crawler", "auth", "axe"]:
             self.logger.info(f"Esecuzione analisi Axe per {base_url} ({repeat_axe} iterazioni)")
             
             axe_success = False
@@ -594,9 +775,27 @@ class Pipeline:
             if not axe_success:
                 self.logger.error(f"Tutte le iterazioni analisi Axe fallite per {base_url}")
                 self.logger.warning(f"Continuo alla fase report finale nonostante fallimenti Axe")
-        else:
-            self.logger.info(f"Salto fase analisi Axe per {base_url} (partenza da {start_stage})")
-        
+            
+            # Add special URL analysis
+            if special_urls:
+                self.logger.info(f"Running Axe analysis on {len(special_urls)} special URLs")
+                try:
+                    special_output_manager = OutputManager(
+                        base_dir=output_root,
+                        domain=f"{output_manager.domain_slug}_auth",
+                        create_dirs=True
+                    )
+                    
+                    await self.run_axe_analysis_on_urls(
+                        base_url, 
+                        domain_config, 
+                        special_output_manager,
+                        special_urls,
+                        auth_manager=self.auth_manager if auth_success else None
+                    )
+                except Exception as e:
+                    self.logger.exception(f"Error in special URLs analysis: {e}")
+
         # Genera report finale
         if not self.shutdown_flag:
             self.logger.info(f"Generazione report finale per {base_url}")
@@ -668,6 +867,12 @@ class Pipeline:
         try:
             # Processa tutti gli URL
             report_paths = await self.process_all_urls()
+            
+            # Cleanup
+            if self.auth_manager:
+                self.auth_manager.close()
+            if self.funnel_manager:
+                self.funnel_manager.close()
             
             # Invia report via email se configurato
             if report_paths and self.config_manager.get_bool("SEND_EMAIL", False):

@@ -101,8 +101,33 @@ def get_logger(
             "max_bytes": 10 * 1024 * 1024,
             "backup_count": 5,
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            'datefmt': '%Y-%m-%d %H:%M:%S',
-            "components": {}
+            "date_format": "%Y-%m-%d %H:%M:%S",
+            "components": {
+                "crawler": {
+                    "level": "INFO",
+                    "log_file": "crawler.log"
+                },
+                "axe_analysis": {
+                    "level": "INFO",
+                    "log_file": "axe_analysis.log"
+                },
+                "report_analysis": {
+                    "level": "INFO",
+                    "log_file": "report_analysis.log"
+                },
+                "pipeline": {
+                    "level": "INFO",
+                    "log_file": "pipeline.log"
+                },
+                "auth_manager": {
+                    "level": "INFO",
+                    "log_file": "auth_manager.log"
+                },
+                "funnel_manager": {
+                    "level": "INFO",
+                    "log_file": "funnel_manager.log"
+                }
+            }
         }
     
     # Merge with provided config

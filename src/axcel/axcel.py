@@ -398,10 +398,28 @@ class AxeAnalysis:
         headless: bool = None,
         resume: bool = None,
         output_folder: str = None,
-        output_manager = None
+        output_manager = None,
+        auth_manager = None  # New parameter
     ) -> None:
         """
         Initialize the accessibility analysis on representative URLs for templates.
+        
+        Args:
+            urls: List of URLs to analyze
+            analysis_state_file: Path to crawler state file
+            crawler_output_dir: Path to crawler output directory
+            domains: Comma-separated list of domains
+            max_templates_per_domain: Maximum number of templates per domain
+            fallback_urls: URLs to use if no templates found
+            pool_size: Number of webdrivers to use
+            sleep_time: Time to sleep between requests
+            excel_filename: Path to Excel output file
+            visited_file: Path to visited URLs file
+            headless: Whether to run browser in headless mode
+            resume: Whether to resume from visited file
+            output_folder: Path to output folder
+            output_manager: Output manager instance
+            auth_manager: Authentication manager instance
         """
         # Use output manager if provided
         self.output_manager = output_manager
@@ -459,6 +477,13 @@ class AxeAnalysis:
 
         self.results: dict[str, list[dict]] = {}
         self.processed_count = 0
+        
+        # Store auth_manager
+        self.auth_manager = auth_manager
+        
+        # If auth_manager is provided, log it
+        if self.auth_manager:
+            logger.info("Authentication manager provided, will be used for restricted areas")
 
     def _load_visited(self) -> None:
         """Load already processed URLs from the visited file."""
@@ -536,6 +561,19 @@ class AxeAnalysis:
         logger.info(f"Starting analysis: {url}")
         driver = await driver_pool.get()
         try:
+            # Check if authentication is needed
+            auth_required = False
+            if self.auth_manager and hasattr(self.auth_manager, 'is_auth_required'):
+                auth_required = self.auth_manager.is_auth_required(url)
+            
+            # Apply authentication if needed
+            if auth_required and self.auth_manager:
+                if not self.auth_manager.is_authenticated:
+                    await asyncio.to_thread(self.auth_manager.login)
+                if self.auth_manager.is_authenticated:
+                    await asyncio.to_thread(self.auth_manager.apply_auth_to_driver, driver)
+                    logger.info(f"Applied authentication for {url}")
+
             await asyncio.to_thread(robust_driver_get, driver, url)
             await asyncio.sleep(self.sleep_time)
             axe = Axe(driver)
@@ -550,6 +588,7 @@ class AxeAnalysis:
                         results = {"violations": []}
                     else:
                         await asyncio.sleep(5)
+            
             issues = []
             for violation in results.get("violations", []):
                 for node in violation.get("nodes", []):
@@ -561,9 +600,11 @@ class AxeAnalysis:
                         "help": violation.get("help", ""),
                         "target": ", ".join([", ".join(x) if isinstance(x, list) else x for x in node.get("target", [])]),
                         "html": node.get("html", ""),
-                        "failure_summary": node.get("failureSummary", "")
+                        "failure_summary": node.get("failureSummary", ""),
+                        "auth_required": auth_required  # Add authentication flag
                     }
                     issues.append(issue)
+            
             self.results[url] = issues
             logger.info(f"{url}: {len(issues)} issues found.")
             self.visited.add(url)
@@ -573,7 +614,6 @@ class AxeAnalysis:
         except Exception as e:
             logger.exception(f"Error processing {url}: {e}")
         finally:
-            # Release the driver back to the pool for reuse
             await driver_pool.put(driver)
 
     async def run(self) -> None:
@@ -670,6 +710,12 @@ class AxeAnalysis:
 
     def start(self) -> None:
         """Start processing and generate the report when done."""
+        # Initialize authentication if needed
+        if self.auth_manager and not getattr(self.auth_manager, 'is_authenticated', False):
+            logger.info("Logging in before starting accessibility analysis")
+            self.auth_manager.login()
+        
+        # Continue with regular processing
         asyncio.run(self.run())
         self.generate_excel_report()
 
@@ -681,7 +727,7 @@ def main() -> None:
     config = config_manager.load_domain_config("sapglegal.com")
     
     crawler_output_dir = "/home/ec2-user/axeScraper/src/multi_domain_crawler/output_crawler"
-    fallback_urls = ["https://sapglegal.com/"]
+    fallback_urls = [""]
     
     analyzer = AxeAnalysis(
         crawler_output_dir=crawler_output_dir,

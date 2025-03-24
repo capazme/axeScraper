@@ -670,6 +670,40 @@ class AccessibilityAnalyzer:
             self.logger.error(f"Error creating page type aggregation: {e}")
             aggregations['By Page Type'] = pd.DataFrame()
         
+        # Add aggregation by page section (public/authenticated)
+        if 'page_section' in df.columns:
+            try:
+                agg_section = df.groupby('page_section').agg(
+                    Total_Violations=pd.NamedAgg(column='violation_id', aggfunc='count'),
+                    Unique_Pages=pd.NamedAgg(column='normalized_url', aggfunc='nunique'),
+                    Critical_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'critical')),
+                    Serious_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'serious')),
+                    Moderate_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'moderate')),
+                    Minor_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'minor')),
+                    Unique_Violations=pd.NamedAgg(column='violation_id', aggfunc='nunique'),
+                    WCAG_Categories=pd.NamedAgg(column='wcag_category', aggfunc=lambda x: len(set(x)))
+                ).reset_index()
+                
+                # Calculate priority score and metrics
+                agg_section['Priority_Score'] = (
+                    agg_section['Critical_Violations'] * 4 + 
+                    agg_section['Serious_Violations'] * 3 + 
+                    agg_section['Moderate_Violations'] * 2 +
+                    agg_section['Minor_Violations'] * 1
+                )
+                
+                # Calculate violations per page
+                agg_section['Violations_Per_Page'] = agg_section['Total_Violations'] / \
+                                                    agg_section['Unique_Pages'].clip(lower=1)
+                
+                # Sort by section
+                agg_section = agg_section.sort_values('page_section')
+                
+                aggregations['By Section'] = agg_section
+            except Exception as e:
+                self.logger.error(f"Error creating section aggregation: {e}")
+                aggregations['By Section'] = pd.DataFrame()
+        
         return aggregations
 
     def create_charts(self, metrics: Dict, aggregations: Dict[str, pd.DataFrame], 
