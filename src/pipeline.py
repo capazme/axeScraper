@@ -19,9 +19,10 @@ import signal
 import time
 import psutil
 import subprocess
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from pathlib import Path
 import traceback
+import pandas as pd
 
 # Import delle classi centrali di gestione
 from utils.config_manager import ConfigurationManager
@@ -428,7 +429,9 @@ class Pipeline:
             self.logger.exception(f"Errore in analisi Axe: {e}")
             return False
     
-    async def run_report_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Optional[str]:
+    async def run_report_analysis(self, base_url: str, domain_config: Dict[str, Any], 
+                                output_manager: OutputManager, 
+                                funnel_metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
         """
         Genera il report finale di accessibilità con gestione standardizzata dei percorsi.
         
@@ -475,6 +478,11 @@ class Pipeline:
             
             # Crea analyzer con output manager
             analyzer = AccessibilityAnalyzer(output_manager=output_manager)
+            
+            # Set funnel metadata if provided
+            if funnel_metadata:
+                analyzer.funnel_metadata = funnel_metadata
+                self.logger.info(f"Added funnel metadata for {len(funnel_metadata)} URLs")
             
             # Esegui pipeline di analisi con progressione chiara
             self.logger.info(f"Caricamento dati accessibilità per {base_url}")
@@ -547,15 +555,16 @@ class Pipeline:
             self.logger.exception(f"Error in authentication: {e}")
             return False
 
-    async def run_funnel_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Dict[str, List[Tuple[str, str, bool]]]:
+    async def run_funnel_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Dict[str, Any]:
         """Run funnel analysis for a domain."""
         self.logger.info(f"Running funnel analysis for {base_url}")
         
         if not self.config_manager.get_bool("FUNNEL_ANALYSIS_ENABLED", False):
             self.logger.info(f"Funnel analysis disabled for {base_url}")
-            return {}
+            return {'enabled': False, 'funnels': {}}
             
         results = {}
+        funnel_metadata = {}  # Store URL -> funnel mappings
         
         try:
             self.funnel_manager = FunnelManager(
@@ -570,8 +579,8 @@ class Pipeline:
             
             if not available_funnels:
                 self.logger.info(f"No funnels defined for {base_url}")
-                return {}
-                
+                return {'enabled': True, 'funnels': {}}
+                    
             self.logger.info(f"Found {len(available_funnels)} funnels for {base_url}")
             
             for funnel_id in available_funnels:
@@ -582,18 +591,81 @@ class Pipeline:
                 funnel_results = self.funnel_manager.execute_funnel(funnel_id)
                 results[funnel_id] = funnel_results
                 
+                # Store metadata mapping for each URL in this funnel
+                for step_name, url, success in funnel_results:
+                    if url:
+                        funnel_metadata[url] = {
+                            'funnel_name': funnel_id,
+                            'funnel_step': step_name,
+                            'success': success
+                        }
+                
                 success_count = sum(1 for _, _, success in funnel_results if success)
                 total_steps = len(funnel_results)
                 self.logger.info(f"Funnel {funnel_id}: {success_count}/{total_steps} steps successful")
             
-            return results
-            
+            return {
+                'enabled': True,
+                'funnels': results,
+                'metadata': funnel_metadata
+            }
+                
         except Exception as e:
             self.logger.exception(f"Error in funnel analysis: {e}")
-            return {}
+            return {'enabled': True, 'funnels': {}, 'metadata': {}}
         finally:
             if self.funnel_manager:
                 self.funnel_manager.close()
+
+    def _add_funnel_metadata_to_axe_results(self, excel_path: Union[str, Path], funnel_metadata: Dict[str, Dict[str, Any]]) -> bool:
+        """Add funnel metadata to Axe Excel results."""
+        if not excel_path or not funnel_metadata:
+            return False
+            
+        try:
+            excel_path = Path(excel_path) if isinstance(excel_path, str) else excel_path
+            
+            if not excel_path.exists():
+                self.logger.warning(f"Excel file not found: {excel_path}")
+                return False
+                
+            self.logger.info(f"Adding funnel metadata to {excel_path}")
+            
+            xls = pd.ExcelFile(excel_path)
+            dfs = {}
+            
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet_name)
+                
+                if df.empty or 'page_url' not in df.columns:
+                    dfs[sheet_name] = df
+                    continue
+                    
+                # Add funnel columns
+                if 'funnel_name' not in df.columns:
+                    df['funnel_name'] = 'none'
+                if 'funnel_step' not in df.columns:
+                    df['funnel_step'] = 'none'
+                    
+                # Update rows with funnel information
+                for url, metadata in funnel_metadata.items():
+                    mask = df['page_url'].apply(lambda x: str(x) == url or url in str(x))
+                    if mask.any():
+                        df.loc[mask, 'funnel_name'] = metadata.get('funnel_name', 'unknown')
+                        df.loc[mask, 'funnel_step'] = metadata.get('funnel_step', 'unknown')
+                        
+                dfs[sheet_name] = df
+            
+            with pd.ExcelWriter(excel_path) as writer:
+                for sheet_name, df in dfs.items():
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+            self.logger.info(f"Successfully added funnel metadata to {excel_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.exception(f"Error adding funnel metadata to Excel file: {e}")
+            return False
 
     async def run_axe_analysis_on_urls(
         self, 
@@ -726,14 +798,18 @@ class Pipeline:
                 authenticated_urls = self.auth_manager.collect_authenticated_urls()
                 self.logger.info(f"Authentication successful, collected {len(authenticated_urls)} restricted URLs")
 
-        # Run funnel analysis if enabled
+        # Run funnel analysis with metadata collection
         funnel_results = {}
         funnel_urls = []
+        funnel_metadata = {}
         if start_stage in ["crawler", "auth", "axe", "funnel"]:
-            funnel_results = await self.run_funnel_analysis(base_url, domain_config, output_manager)
-            if self.funnel_manager:
-                funnel_urls = self.funnel_manager.get_all_visited_urls()
-                self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
+            funnel_analysis_result = await self.run_funnel_analysis(base_url, domain_config, output_manager)
+            if funnel_analysis_result.get('enabled', False):
+                funnel_results = funnel_analysis_result.get('funnels', {})
+                funnel_metadata = funnel_analysis_result.get('metadata', {})
+                if self.funnel_manager:
+                    funnel_urls = self.funnel_manager.get_all_visited_urls()
+                    self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
 
         # Combine special URLs for scanning
         special_urls = list(set(authenticated_urls + funnel_urls))
@@ -797,24 +873,32 @@ class Pipeline:
                 except Exception as e:
                     self.logger.exception(f"Error analyzing authenticated URLs: {e}")
 
-        # Genera report finale
+        # Add funnel metadata to main analysis results
         if not self.shutdown_flag:
-            self.logger.info(f"Generazione report finale per {base_url}")
             try:
-                report_path = await self.run_report_analysis(base_url, domain_config, output_manager)
+                # Add metadata to main results
+                self._add_funnel_metadata_to_axe_results(
+                    output_manager.get_path("axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"),
+                    funnel_metadata
+                )
+                
+                # Generate report with funnel data
+                report_path = await self.run_report_analysis(
+                    base_url, 
+                    domain_config, 
+                    output_manager,
+                    funnel_metadata=funnel_metadata
+                )
                 
                 if report_path:
-                    self.logger.info(f"Report finale generato per {base_url}: {report_path}")
+                    self.logger.info(f"Report generated with funnel data for {base_url}: {report_path}")
                     return report_path
-                else:
-                    self.logger.error(f"Impossibile generare report finale per {base_url}")
-                    return None
+                
             except Exception as e:
-                self.logger.exception(f"Errore non gestito in fase report finale: {e}")
+                self.logger.exception(f"Error in final report generation: {e}")
                 return None
-        else:
-            self.logger.warning(f"Interruzione richiesta prima della fase report finale per {base_url}")
-            return None
+
+        return None
     
     async def process_all_urls(self) -> List[str]:
         """

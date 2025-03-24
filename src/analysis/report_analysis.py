@@ -162,6 +162,14 @@ class AccessibilityAnalyzer:
         self._url_type_cache = {}
         self._normalized_url_cache = {}
         self._wcag_mapping_cache = {}
+        
+        # Add funnel configuration
+        self.funnel_categories = {
+            'checkout': ['cart', 'checkout', 'payment', 'confirmation'],
+            'registration': ['register', 'verification', 'profile'],
+            'login': ['login', 'account', 'dashboard'],
+            'search': ['search', 'results', 'filters', 'product'],
+        }
       
     def normalize_url(self, url: str) -> str:
         """
@@ -268,6 +276,27 @@ class AccessibilityAnalyzer:
         clean_df['wcag_criterion'] = clean_df['violation_id'].apply(self._get_wcag_criterion)
         clean_df['wcag_name'] = clean_df['violation_id'].apply(self._get_wcag_name)
         clean_df['severity_score'] = clean_df['impact'].map(self.impact_weights)
+        
+        # Add funnel identification if present
+        if 'funnel_name' in clean_df.columns:
+            # Keep existing funnel data
+            clean_df['has_funnel_data'] = clean_df['funnel_name'] != 'none'
+        else:
+            # Add funnel column with default 'none'
+            clean_df['funnel_name'] = 'none'
+            clean_df['has_funnel_data'] = False
+            
+        if 'funnel_step' not in clean_df.columns:
+            clean_df['funnel_step'] = 'none'
+            
+        # Calculate funnel-specific metrics
+        if clean_df['has_funnel_data'].any():
+            clean_df['funnel_severity_score'] = clean_df.apply(
+                lambda row: self.impact_weights.get(row['impact'], 0) * 1.5 
+                if row['has_funnel_data'] else self.impact_weights.get(row['impact'], 0),
+                axis=1
+            )
+        
         self.logger.info(f"Original rows: {original_count}, remaining: {len(clean_df)}")
         return clean_df
         
@@ -361,6 +390,17 @@ class AccessibilityAnalyzer:
             # Continue with depth calculation - existing code here...
             
             self.logger.info(f"Successfully integrated crawler data into {len(df)} rows")
+            
+            # After template mapping
+            # Look for funnel data if present
+            if 'funnel_name' in df.columns and not all(df['funnel_name'] == 'none'):
+                self.logger.info("Funnel data detected - adding funnel information to aggregations")
+                df['has_funnel_data'] = df['funnel_name'] != 'none'
+                
+                if 'page_type' in df.columns:
+                    # Add 'funnel' as a special page type for funnel pages
+                    df.loc[df['has_funnel_data'], 'page_type'] = 'funnel_' + df.loc[df['has_funnel_data'], 'page_type']
+            
             return df
         
         except Exception as e:
@@ -439,6 +479,27 @@ class AccessibilityAnalyzer:
             conformance_level = 'Non-conformant (Major issues)'
         metrics['WCAG Conformance Level'] = conformance_level
         self.logger.info(f"Calculated advanced metrics for {metrics['Total Violations']} violations across {metrics['Unique Pages']} pages")
+        
+        # Add funnel metrics if funnel data exists
+        if 'funnel_name' in df.columns and not df['funnel_name'].eq('none').all():
+            funnel_data = df[df['funnel_name'] != 'none']
+            
+            metrics['Funnel Analysis'] = {
+                'Total Funnels': funnel_data['funnel_name'].nunique(),
+                'Total Funnel Pages': funnel_data['normalized_url'].nunique(),
+                'Total Funnel Violations': len(funnel_data),
+            }
+            
+            # Calculate most problematic funnel
+            most_critical_funnel = (
+                funnel_data.groupby('funnel_name')
+                .apply(lambda x: (x['impact'] == 'critical').sum() / x['normalized_url'].nunique())
+                .sort_values(ascending=False)
+            )
+            
+            if not most_critical_funnel.empty:
+                metrics['Funnel Analysis']['Most Problematic Journey'] = most_critical_funnel.index[0]
+                
         return metrics
     
     def _empty_metrics(self) -> Dict:
@@ -1423,7 +1484,13 @@ class AccessibilityAnalyzer:
                 else:
                     value_format = cell_format
                 summary_ws.write(row, 0, key, cell_format)
-                summary_ws.write(row, 1, value, value_format)
+                self.logger.debug(f"Writing value of type {type(value)}: {value}")
+                if isinstance(value, dict):
+                    # Converti il dizionario in una stringa JSON o in una rappresentazione leggibile
+                    value_str = str(value)  # oppure json.dumps(value)
+                    summary_ws.write(row, 1, value_str, value_format)
+                else:
+                    summary_ws.write(row, 1, value, value_format)
                 summary_ws.write(row, 2, metric_descriptions.get(key, ""), cell_format)
                 row += 1
             

@@ -31,7 +31,7 @@
   "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
   
   "CRAWLER_MAX_WORKERS": 16,
-  "CRAWLER_MAX_URLS": 100,
+  "CRAWLER_MAX_URLS": 50,
   "CRAWLER_MAX_RETRIES": 10,
   "CRAWLER_REQUEST_DELAY": 0.5,
   "CRAWLER_HYBRID_MODE": true,
