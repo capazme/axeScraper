@@ -43,7 +43,7 @@
   "AXE_HEADLESS": true,
   "AXE_RESUME": true,
   
-  "AUTH_ENABLED": true,
+  "AUTH_ENABLED": false,
   "AUTH_STRATEGY": "form",
   "AUTH_LOGIN_URL": "https://www.locautorent.com/it/mylocauto/#/auth/login",
   "AUTH_USERNAME": "guglielmo.puzio00@gmail.com",
@@ -61,7 +61,8 @@
   ],
   
   "AUTH_POST_LOGIN_ACTIONS": [
-    {"type": "wait", "seconds": 3}
+    {"type": "wait", "seconds": 3},
+    {"type": "screenshot", "filename": "post_login.png"}
   ],
   
   "AUTH_DOMAINS": {
@@ -91,27 +92,29 @@
   "FUNNELS": {
     "account_creation": {
       "description": "Sign-up process from landing page to account creation",
-      "domain": "example_com",
+      "domain": "locautorent_com",
       "auth_required": false,
       "steps": [
         {
           "name": "LandingPage",
           "url": "https://www.locautorent.com/it/ab-testing-enable-version/?code=9N0C47hqP2o5HTU4QhPx0K1b&version=v1",
-          "wait_for_selector": "#header > div.wrapper > div > div:nth-child(1) > a",
+          "wait_for_selector": "#header > div.wrapper > div > div:nth-child(3) > a",
           "actions": [
             {"type": "cookie_banner"},
-            {"type": "wait", "seconds": 2}
-                    ],
+            {"type": "wait", "seconds": 2},
+            {"type": "screenshot", "filename": "landing_page.png"}
+          ],
           "success_condition": {
             "type": "element_visible",
-            "selector": "#header > div.wrapper > div > div:nth-child(1) > a"
+            "selector": "#header > div.wrapper > div > div:nth-child(3) > a"
           }
         },
         {
           "name": "ClickLogin",
           "actions": [
-            {"type": "click", "selector": "#header > div.wrapper > div > div:nth-child(1) > a"},
-            {"type": "wait", "seconds": 3}
+            {"type": "click", "selector": "#header > div.wrapper > div > div:nth-child(3) > a"},
+            {"type": "wait", "seconds": 3},
+            {"type": "screenshot", "filename": "login_form.png"}
           ],
           "success_condition": {
             "type": "element_visible",
@@ -122,11 +125,12 @@
           "name": "ClickSignUp",
           "actions": [
             {"type": "click", "selector": "#app > div > div.MylocautoLoginModal.v--modal-overlay > div > div.v--modal-box.v--modal > div > div.CustomerCareForm.simpleVariant.loginInModal > form > div.subtitleinmodal > p > a"},
-            {"type": "wait", "seconds": 3}
+            {"type": "wait", "seconds": 3},
+            {"type": "screenshot", "filename": "signup_form.png"}
           ],
           "success_condition": {
             "type": "element_visible",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > h3"
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div"
           }
         },
         {
@@ -138,7 +142,8 @@
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(5) > div > div > input[type=text]", "value": "roma.01@sapglegal.com"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(6) > div > div > input[type=password]", "value": "Securepassword123!"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(7) > div > div > input[type=password]", "value": "Securepassword123!"},
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.checkboxsWrapper > div:nth-child(1) > label > i"}
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.checkboxsWrapper > div:nth-child(1) > label > i"},
+            {"type": "screenshot", "filename": "filled_form.png"}
           ],
           "success_condition": {
             "type": "element_clickable",
@@ -149,7 +154,8 @@
           "name": "SubmitForm",
           "actions": [
             {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.registerCtaWrapper > a"},
-            {"type": "wait", "seconds": 5}
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "after_submit.png"}
           ],
           "success_condition": {
             "type": "element_visible",

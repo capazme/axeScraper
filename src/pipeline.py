@@ -604,72 +604,62 @@ class Pipeline:
         auth_manager = None
     ) -> bool:
         """Run Axe analysis on specific URLs."""
-        self.logger.info(f"Avvio analisi Axe su URL specifici per {base_url}")
+        if not urls:
+            self.logger.warning(f"No URLs provided for analysis")
+            return False
         
-        # Ottieni configurazione axe
-        axe_config = domain_config.get("axe_config", {})
-        
-        # Definisci percorsi aggiuntivi tramite output manager
-        excel_filename = str(output_manager.get_path(
-            "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
-        visited_file = str(output_manager.get_path(
-            "axe", f"visited_urls_{output_manager.domain_slug}.txt"))
-        
-        # Assicura che le directory esistano
-        output_manager.ensure_path_exists("axe")
-        
-        # Ottieni i valori configurazione dalle chiavi standardizzate
-        max_templates = axe_config.get('max_templates_per_domain', 
-                                self.config_manager.get_int("AXE_MAX_TEMPLATES", 50))
-        pool_size = axe_config.get('pool_size', 
-                            self.config_manager.get_int("AXE_POOL_SIZE", 5))
-        sleep_time = axe_config.get('sleep_time', 
-                            self.config_manager.get_float("AXE_SLEEP_TIME", 1.0))
-        headless = axe_config.get('headless', 
-                            self.config_manager.get_bool("AXE_HEADLESS", True))
-        resume = axe_config.get('resume', 
-                        self.config_manager.get_bool("AXE_RESUME", True))
-        
-        # Log configurazione con chiavi standardizzate
-        self.logger.info(f"Configurazione Axe Analysis:")
-        self.logger.info(f"AXE_MAX_TEMPLATES: {max_templates}")
-        self.logger.info(f"AXE_POOL_SIZE: {pool_size}")
-        self.logger.info(f"AXE_SLEEP_TIME: {sleep_time}")
-        self.logger.info(f"AXE_HEADLESS: {headless}")
-        self.logger.info(f"AXE_RESUME: {resume}")
+        self.logger.info(f"Running Axe analysis on {len(urls)} special URLs")
+        self.logger.info(f"First 5 URLs: {urls[:5]}")
         
         try:
-            # Crea analyzer con percorsi standardizzati
+            # Get configuration for Axe
+            axe_config = domain_config.get("axe_config", {})
+            
+            # Define paths through output manager
+            excel_filename = str(output_manager.get_path(
+                "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
+            visited_file = str(output_manager.get_path(
+                "axe", f"visited_urls_{output_manager.domain_slug}.txt"))
+            
+            # Ensure directories exist
+            output_manager.ensure_path_exists("axe")
+            
+            # Create AxeAnalysis configured specifically for these URLs
             analyzer = AxeAnalysis(
-                urls=urls,
-                analysis_state_file=None,
+                urls=urls,  # Pass the URLs directly
+                analysis_state_file=None,  # No state file needed for direct URL analysis
                 domains=axe_config.get("domains"),
-                max_templates_per_domain=max_templates,  # Usa il valore standardizzato
-                fallback_urls=[],
-                pool_size=pool_size,  # Usa il valore standardizzato
-                sleep_time=sleep_time,  # Usa il valore standardizzato
+                max_templates_per_domain=axe_config.get('max_templates_per_domain', 
+                                    self.config_manager.get_int("AXE_MAX_TEMPLATES", 50)),
+                fallback_urls=[],  # No fallback needed
+                pool_size=axe_config.get('pool_size', 
+                                self.config_manager.get_int("AXE_POOL_SIZE", 5)),
+                sleep_time=axe_config.get('sleep_time', 
+                                self.config_manager.get_float("AXE_SLEEP_TIME", 1.0)),
                 excel_filename=excel_filename,
                 visited_file=visited_file,
-                headless=headless,  # Usa il valore standardizzato
-                resume=resume,  # Usa il valore standardizzato
+                headless=axe_config.get('headless', 
+                                self.config_manager.get_bool("AXE_HEADLESS", True)),
+                resume=axe_config.get('resume', 
+                            self.config_manager.get_bool("AXE_RESUME", True)),
                 output_folder=str(output_manager.get_path("axe")),
                 output_manager=output_manager,
                 auth_manager=auth_manager
             )
             
-            # Esegui analisi in un thread per evitare blocco asyncio
+            # Run the analysis
             await asyncio.to_thread(analyzer.start)
             
-            # Verifica output creato
+            # Verify output was created
             if os.path.exists(excel_filename):
-                self.logger.info(f"Analisi Axe completata con successo per {base_url}")
+                self.logger.info(f"Special URL analysis completed successfully: {excel_filename}")
                 return True
             else:
-                self.logger.error(f"Analisi Axe non ha prodotto output per {base_url}")
+                self.logger.error(f"Special URL analysis produced no output")
                 return False
                 
         except Exception as e:
-            self.logger.exception(f"Errore in analisi Axe: {e}")
+            self.logger.exception(f"Error in special URL analysis: {e}")
             return False
 
     async def process_url(self, base_url: str) -> Optional[str]:
@@ -733,8 +723,8 @@ class Pipeline:
         if start_stage in ["crawler", "auth", "axe"]:
             auth_success = await self.run_authentication(base_url, domain_config, output_manager)
             if auth_success and self.auth_manager:
-                authenticated_urls = self.auth_manager.authenticated_urls
-                self.logger.info(f"Authentication successful, {len(authenticated_urls)} URLs available")
+                authenticated_urls = self.auth_manager.collect_authenticated_urls()
+                self.logger.info(f"Authentication successful, collected {len(authenticated_urls)} restricted URLs")
 
         # Run funnel analysis if enabled
         funnel_results = {}
@@ -745,10 +735,10 @@ class Pipeline:
                 funnel_urls = self.funnel_manager.get_all_visited_urls()
                 self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
 
-        # Combine special URLs
+        # Combine special URLs for scanning
         special_urls = list(set(authenticated_urls + funnel_urls))
 
-        # Run standard and special URL analysis
+        # Run standard analysis
         if start_stage in ["crawler", "auth", "axe"]:
             self.logger.info(f"Esecuzione analisi Axe per {base_url} ({repeat_axe} iterazioni)")
             
@@ -776,12 +766,13 @@ class Pipeline:
                 self.logger.error(f"Tutte le iterazioni analisi Axe fallite per {base_url}")
                 self.logger.warning(f"Continuo alla fase report finale nonostante fallimenti Axe")
             
-            # Add special URL analysis
+            # Add additional scanning for authenticated URLs
             if special_urls:
-                self.logger.info(f"Running Axe analysis on {len(special_urls)} special URLs")
+                self.logger.info(f"Running separate analysis on {len(special_urls)} authenticated and funnel URLs")
                 try:
-                    special_output_manager = OutputManager(
-                        base_dir=output_root,
+                    # Create a separate output manager for authenticated content
+                    auth_output_manager = OutputManager(
+                        base_dir=output_manager.base_dir,
                         domain=f"{output_manager.domain_slug}_auth",
                         create_dirs=True
                     )
@@ -789,12 +780,22 @@ class Pipeline:
                     await self.run_axe_analysis_on_urls(
                         base_url, 
                         domain_config, 
-                        special_output_manager,
+                        auth_output_manager,
                         special_urls,
                         auth_manager=self.auth_manager if auth_success else None
                     )
+                    
+                    # Don't forget to analyze this report too
+                    auth_report_path = await self.run_report_analysis(
+                        base_url, 
+                        domain_config, 
+                        auth_output_manager
+                    )
+                    
+                    if auth_report_path:
+                        self.logger.info(f"Generated authenticated area report: {auth_report_path}")
                 except Exception as e:
-                    self.logger.exception(f"Error in special URLs analysis: {e}")
+                    self.logger.exception(f"Error analyzing authenticated URLs: {e}")
 
         # Genera report finale
         if not self.shutdown_flag:

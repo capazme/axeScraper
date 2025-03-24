@@ -214,20 +214,26 @@ class FunnelManager:
             elif action_type == "cookie_banner":
                 self.logger.debug("Handling cookie banner")
                 cookie_script = """
-                var cookieButtons = document.querySelectorAll(
-                    'button[id*="cookie"], button[class*="cookie"], button[id*="consent"], 
-                    button[class*="consent"], #onetrust-accept-btn-handler, 
-                    .cookie-banner .accept, .cookie-notice .accept'
-                );
-                for(var i=0; i<cookieButtons.length; i++) {
-                    if(cookieButtons[i].offsetParent !== null) {
-                        cookieButtons[i].click();
-                        return true;
+                try {
+                    var cookieButtons = document.querySelectorAll(
+                        'button[id*="cookie"], button[class*="cookie"], ' +
+                        'button[id*="consent"], button[class*="consent"], ' +
+                        '#onetrust-accept-btn-handler, .cookie-banner .accept, ' +
+                        '.cookie-notice .accept'
+                    );
+                    for(var i=0; i<cookieButtons.length; i++) {
+                        if(cookieButtons[i].offsetParent !== null) {
+                            cookieButtons[i].click();
+                            return true;
+                        }
                     }
+                    return false;
+                } catch(e) {
+                    console.error("Error in cookie handling:", e);
+                    return false;
                 }
-                return false;
                 """
-                self.driver.execute_script(cookie_script)
+                return self.driver.execute_script(cookie_script)
                 
             else:
                 self.logger.warning(f"Unknown action type: {action_type}")
@@ -297,6 +303,47 @@ class FunnelManager:
             self.logger.error(f"Error checking success condition: {e}")
             return False
     
+    def save_screenshot(self, filename: str, subdirectory: Optional[str] = None) -> Optional[Path]:
+        """
+        Safely save a screenshot from the current driver state.
+        
+        Args:
+            filename: Name of screenshot file
+            subdirectory: Optional subdirectory under screenshots
+            
+        Returns:
+            Path or None: Path to saved screenshot or None if failed
+        """
+        if not self.driver:
+            self.logger.warning("Cannot save screenshot - driver not initialized")
+            return None
+            
+        if not self.output_manager:
+            self.logger.warning("Cannot save screenshot - no output manager")
+            return None
+            
+        try:
+            # Determine path with proper directory creation
+            if subdirectory:
+                screenshot_dir = self.output_manager.ensure_nested_path_exists("screenshots", subdirectory)
+                screenshot_path = screenshot_dir / filename
+            else:
+                screenshot_dir = self.output_manager.ensure_path_exists("screenshots")
+                screenshot_path = screenshot_dir / filename
+            
+            # Take the screenshot
+            success = self.driver.save_screenshot(str(screenshot_path))
+            
+            if success:
+                self.logger.info(f"Screenshot saved to: {screenshot_path}")
+                return screenshot_path
+            else:
+                self.logger.warning(f"Failed to save screenshot to: {screenshot_path}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Error saving screenshot: {e}")
+            return None
+
     def execute_funnel(self, funnel_id: str) -> List[Tuple[str, str, bool]]:
         """
         Execute a funnel by navigating through its steps.
@@ -334,10 +381,14 @@ class FunnelManager:
         # Track results for each step
         results = []
         
-        # Create funnel results directory
+        # Create funnel results directory safely
         if self.output_manager:
-            funnel_dir = self.output_manager.get_path("funnels", funnel_id)
-            self.output_manager.ensure_path_exists("funnels", funnel_id)
+            try:
+                funnel_dir = self.output_manager.ensure_nested_path_exists("funnels", funnel_id)
+                self.logger.info(f"Created funnel directory: {funnel_dir}")
+            except Exception as e:
+                self.logger.error(f"Error creating funnel directory: {e}")
+                return []
         
         # Execute each step
         for i, step in enumerate(funnel.get("steps", [])):
@@ -365,9 +416,11 @@ class FunnelManager:
                 
                 # Take screenshot at step start
                 if self.output_manager:
-                    screenshot_path = self.output_manager.get_path("funnels", funnel_id, f"step_{i+1}_start.png")
-                    self.driver.save_screenshot(str(screenshot_path))
-                
+                    self.save_screenshot(
+                        f"step_{i+1}_start.png",
+                        subdirectory=f"funnels/{funnel_id}"
+                    )
+
                 # Execute actions
                 for j, action in enumerate(step.get("actions", [])):
                     if not self.perform_action(action):
@@ -378,8 +431,10 @@ class FunnelManager:
                 
                 # Take screenshot after actions
                 if self.output_manager:
-                    screenshot_path = self.output_manager.get_path("funnels", funnel_id, f"step_{i+1}_end.png")
-                    self.driver.save_screenshot(str(screenshot_path))
+                    self.save_screenshot(
+                        f"step_{i+1}_end.png",
+                        subdirectory=f"funnels/{funnel_id}"
+                    )
                 
                 # Check success condition
                 success_condition = step.get("success_condition", None)
@@ -394,11 +449,19 @@ class FunnelManager:
                 
                 # Save current page source for later analysis
                 if self.output_manager:
-                    page_source = self.driver.page_source
-                    page_source_path = self.output_manager.get_path(
-                        "funnels", funnel_id, f"step_{i+1}_{step_name.lower().replace(' ', '_')}.html")
-                    with open(page_source_path, "w", encoding="utf-8") as f:
-                        f.write(page_source)
+                    try:
+                        page_source = self.driver.page_source
+                        safe_name = step_name.lower().replace(' ', '_').replace('/', '_')
+                        page_source_path = funnel_dir / f"step_{i+1}_{safe_name}.html"
+                        
+                        success = self.output_manager.safe_write_file(
+                            page_source_path,
+                            page_source
+                        )
+                        if success:
+                            self.logger.info(f"Successfully saved page source: {page_source_path}")
+                    except Exception as e:
+                        self.logger.error(f"Error saving page source: {e}")
                 
                 # Check if we should continue
                 if not success:
@@ -417,10 +480,19 @@ class FunnelManager:
         
         # Save funnel results
         if self.output_manager:
-            results_path = self.output_manager.get_path("funnels", funnel_id, "results.json")
-            with open(results_path, "w", encoding="utf-8") as f:
-                json.dump([{"step": name, "url": url, "success": success} for name, url, success in results], 
-                          f, indent=2)
+            try:
+                results_data = json.dumps([
+                    {"step": name, "url": url, "success": success} 
+                    for name, url, success in results
+                ], indent=2)
+                
+                results_path = funnel_dir / "results.json"
+                success = self.output_manager.safe_write_file(results_path, results_data)
+                
+                if success:
+                    self.logger.info(f"Successfully saved funnel results to: {results_path}")
+            except Exception as e:
+                self.logger.error(f"Error saving funnel results: {e}")
         
         # Log results
         success_count = sum(1 for _, _, success in results if success)
