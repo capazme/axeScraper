@@ -750,23 +750,9 @@ class AccessibilityAnalyzer:
         return metrics
     
     def create_aggregations(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-        """
-        Create informative aggregations from the cleaned DataFrame.
-        
-        Args:
-            df: Cleaned DataFrame
-            
-        Returns:
-            Dictionary of aggregation DataFrames
-        """
-        if df.empty:
-            self.logger.warning("Empty DataFrame, cannot create aggregations")
-            return {'By Impact': pd.DataFrame(), 'By Page': pd.DataFrame(), 
-                    'By Violation': pd.DataFrame(), 'Common Issues': pd.DataFrame()}
-        
         aggregations = {}
         
-        # Aggregation by impact
+        # Aggregazione per impatto
         try:
             agg_impact = (df.groupby('impact')
                          .agg(Total_Violations=('violation_id', 'count'),
@@ -774,12 +760,40 @@ class AccessibilityAnalyzer:
                               Avg_Per_Page=('violation_id', lambda x: len(x) / df['normalized_url'].nunique() if df['normalized_url'].nunique() > 0 else 0))
                          .reset_index())
             total = agg_impact['Total_Violations'].sum()
+            agg_impact['Percentage'] = (agg_impact['Total_Violations'] / total * 100).round(2) if total > 0 else 0
+            
+            # Aggiungi Priority Index
+            impact_weights = {'critical': 1.0, 'serious': 0.7, 'moderate': 0.4, 'minor': 0.1}
+            agg_impact['Priority_Index'] = agg_impact['impact'].map(impact_weights) * agg_impact['Percentage']
+            
+            aggregations['By Impact'] = agg_impact
+            
+        except Exception as e:
+            self.logger.error(f"Error creating aggregation by impact: {str(e)}")
+            aggregations['By Impact'] = pd.DataFrame()
+        
+        # Aggregation by page
+        try:
+            agg_page = (df.groupby('normalized_url')
+                       .agg(Total_Violations=('violation_id', 'count'),
+                            Critical_Violations=('impact', lambda x: sum(x == 'critical')),
+                            Serious_Violations=('impact', lambda x: sum(x == 'serious')),
+                            Moderate_Violations=('impact', lambda x: sum(x == 'moderate')),
+                            Minor_Violations=('impact', lambda x: sum(x == 'minor')),
+                            Page_Type=('page_type', 'first'),
+                            Display_URL=('page_url', 'first'))
+                       .reset_index())
+            agg_page['Priority_Score'] = (
+                agg_page['Critical_Violations'] * 4 + 
+                agg_page['Serious_Violations'] * 3 + 
+                agg_page['Moderate_Violations'] * 2 +
+                agg_page['Minor_Violations'] * 1
+            )
+            aggregations['By Page'] = agg_page
+        except Exception as e:
             self.logger.error(f"Error creating page aggregation: {e}")
             aggregations['By Page'] = pd.DataFrame()
-        except Exception as e:
-            self.logger.error(f"Error creating aggregation by impact: {e}")
-            aggregations['By Impact'] = pd.DataFrame()
-            
+        
         # Aggregation by violation type
         try:
             agg_violation = (df.groupby('violation_id')
@@ -2381,7 +2395,7 @@ class AccessibilityAnalyzer:
                         
                     funnel_ws.write(row, 6, score, score_format)
                     row += 1
-        
+            
         # Insert funnel charts if available
         row += 2
         chart_row = row
