@@ -854,3 +854,6 @@ class ConfigurationManager:
         self.logger.info(f"Soglia Selenium: {self.get_int('CRAWLER_PENDING_THRESHOLD')}")
         self.logger.info(f"Email destinatario: {self.get('EMAIL_RECIPIENT', 'non impostato')}")
         self.logger.info("=== Fine Riepilogo ===")
+
+# Create a global instance for direct import
+CONFIGMANAGER_INSTANCE = get_config_manager()

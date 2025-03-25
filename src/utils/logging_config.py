@@ -74,7 +74,19 @@ def setup_logging(
     
     return logger
 
-def get_logger(component_name, log_config=None, output_manager=None):
+def get_logger(component_name: str, log_config: Optional[Dict[str, Any]] = None, 
+               output_manager: Optional[Any] = None) -> logging.Logger:
+    """
+    Get or create a logger with standardized configuration.
+    
+    Args:
+        component_name: Name of the component requesting the logger
+        log_config: Optional logging configuration
+        output_manager: Optional output manager for path resolution
+        
+    Returns:
+        Configured logger instance
+    """
     # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
     
@@ -85,128 +97,62 @@ def get_logger(component_name, log_config=None, output_manager=None):
     # Prevent propagation to parent loggers to avoid duplication
     logger.propagate = False
     
-    # Use a simple default configuration during initialization
-    if component_name.endswith('.config'):
-        # For config loggers, use a simple default configuration
-        setup_logging(
-            log_level="INFO",
-            log_dir="./logs",
-            component_name=component_name,
-            console_output=True
-        )
-        return logger
-    
-    # For other loggers, try to get configuration
     try:
-        # Import here to avoid circular imports
-        from .config_manager import CONFIGMANAGER_INSTANCE
-        
-        # Use the existing instance if available, otherwise use default config
-        if CONFIGMANAGER_INSTANCE is not None:
-            config = CONFIGMANAGER_INSTANCE.get_logging_config()
-        else:
-            # Default configuration as fallback
-            config = {
-                "level": "INFO",
-                "console_output": True,
-                "rotating_logs": True,
-                "max_bytes": 10 * 1024 * 1024,
-                "backup_count": 5,
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "date_format": "%Y-%m-%d %H:%M:%S",
-                "components": {
-                    "crawler": {
-                        "level": "INFO",
-                        "log_file": "crawler.log"
-                    },
-                    "axe_analysis": {
-                        "level": "INFO",
-                        "log_file": "axe_analysis.log"
-                    },
-                    "report_analysis": {
-                        "level": "INFO",
-                        "log_file": "report_analysis.log"
-                    },
-                    "pipeline": {
-                        "level": "INFO",
-                        "log_file": "pipeline.log"
-                    },
-                    "auth_manager": {
-                        "level": "INFO",
-                        "log_file": "auth_manager.log"
-                    },
-                    "funnel_manager": {
-                        "level": "INFO",
-                        "log_file": "funnel_manager.log"
-                    }
-                }
-            }
+        # Only attempt to import if needed
+        if not log_config:
+            # Import dynamically to avoid circular imports
+            from utils.config_manager import get_config_manager
+            
+            # Get or create configuration manager
+            config_manager = get_config_manager()
+            if config_manager:
+                log_config = config_manager.get_logging_config().get("components", {}).get(component_name, {})
     except ImportError:
-        # Fallback configuration if config_manager can't be imported
-        config = {
-            "level": "INFO",
-            "console_output": True,
-            "rotating_logs": True,
-            "max_bytes": 10 * 1024 * 1024,
-            "backup_count": 5,
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            "date_format": "%Y-%m-%d %H:%M:%S",
-            "components": {
-                "crawler": {
-                    "level": "INFO",
-                    "log_file": "crawler.log"
-                },
-                "axe_analysis": {
-                    "level": "INFO",
-                    "log_file": "axe_analysis.log"
-                },
-                "report_analysis": {
-                    "level": "INFO",
-                    "log_file": "report_analysis.log"
-                },
-                "pipeline": {
-                    "level": "INFO",
-                    "log_file": "pipeline.log"
-                },
-                "auth_manager": {
-                    "level": "INFO",
-                    "log_file": "auth_manager.log"
-                },
-                "funnel_manager": {
-                    "level": "INFO",
-                    "log_file": "funnel_manager.log"
-                }
-            }
-        }
-    
-    # Merge with provided config
-    if log_config:
-        for key, value in log_config.items():
-            config[key] = value
+        # If import fails, use default config
+        pass
+        
+    # Use default log level if not specified in config
+    log_level = log_config.get("level", "INFO") if log_config else "INFO"
     
     # Get log directory from output_manager if provided
     if output_manager:
         log_dir = output_manager.get_path("logs")
         log_file = f"{component_name}.log"
     else:
-        log_dir = config.get("log_dir", "./logs")
-        # Get component-specific log file if specified
-        component_config = config.get("components", {}).get(component_name, {})
-        log_file = component_config.get("log_file", f"{component_name}.log")
+        log_dir = Path("./logs")
+        log_file = f"{component_name}.log"
+
+    # Ensure log directory exists
+    os.makedirs(log_dir, exist_ok=True)
     
-    # Get component-specific log level if available
-    log_level = config.get("components", {}).get(component_name, {}).get("level", config.get("level", "INFO"))
-    
-    # Set up logging with merged configuration
-    return setup_logging(
-        log_level=log_level,
-        log_dir=log_dir,
-        log_file=log_file,
-        component_name=component_name,
-        console_output=config.get("console_output", True),
-        rotating_logs=config.get("rotating_logs", True),
-        max_bytes=config.get("max_bytes", 10 * 1024 * 1024),
-        backup_count=config.get("backup_count", 5),
-        log_format=config.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-        date_format=config.get("date_format", "%Y-%m-%d %H:%M:%S")
+    # Create file handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_dir / log_file,
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
     )
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Set formatter for handlers
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Set log level for handlers
+    file_handler.setLevel(log_level)
+    console_handler.setLevel(log_level)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    # Set logger level
+    logger.setLevel(log_level)
+    
+    return logger

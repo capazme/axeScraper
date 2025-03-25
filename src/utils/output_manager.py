@@ -88,25 +88,18 @@ class OutputManager:
         return path
     
     def get_path(self, component: str, *path_elements) -> Path:
-        """
-        Get path for a specific component, optionally with a nested path.
-        
-        Args:
-            component: The component name (e.g., "funnels")
-            *path_elements: Variable number of path elements to append
-            
-        Returns:
-            Complete Path object
-        """
+        """Get path for a specific component with consistent handling."""
         if component not in self.structure:
-            raise ValueError(f"Unknown component: {component}")
-                
-        path = self.structure[component]
+            # Ensure logs always go to the same place
+            if component == "logs":
+                path = self.structure.get("logs", self.base_dir / self.domain_slug / "logs")
+            else:
+                raise ValueError(f"Unknown component: {component}")
+        else:
+            path = self.structure[component]
         
-        # Filter out None values and convert all elements to strings
+        # Handle path elements normally
         valid_elements = [str(element) for element in path_elements if element is not None]
-        
-        # Handle multiple path elements by joining them to the base path
         if valid_elements:
             return path.joinpath(*valid_elements)
         
