@@ -10,6 +10,17 @@ import datetime
 from utils.config_schema_additions import CONFIG_SCHEMA_ADDITIONS
 
 T = TypeVar('T')
+_CONFIG_MANAGER_INSTANCE = None
+_INITIALIZING = False  # Flag to prevent recursion
+
+def get_config_manager(project_name="axeScraper", config_file=None, cli_args=None):
+    global _CONFIG_MANAGER_INSTANCE, _INITIALIZING
+    if _CONFIG_MANAGER_INSTANCE is None and not _INITIALIZING:
+        _INITIALIZING = True  # Set flag before initializing
+        _CONFIG_MANAGER_INSTANCE = ConfigurationManager(project_name, config_file, cli_args=cli_args)
+        _INITIALIZING = False  # Reset flag after initialization
+    return _CONFIG_MANAGER_INSTANCE
+
 
 # Definizione dello schema di configurazione
 DEFAULT_CONFIG_SCHEMA = {
@@ -145,13 +156,16 @@ class ConfigurationManager:
         # Alias mapping
         self.aliases = self._build_alias_mapping()
         
-        # Configura il logger
+        # Set up a simple logger directly without using get_logger() function
         self.logger = logging.getLogger(f"{project_name}.config")
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+            self.logger.propagate = False  # Prevent propagation
+
         
         # Informazioni sul sistema
         self.cpu_count = multiprocessing.cpu_count()

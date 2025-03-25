@@ -61,10 +61,11 @@ def setup_logging(
         logger.addHandler(file_handler)
     
     # Add console handler if requested
-    if console_output:
+    if console_output and not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
+
     
     # Log startup message
     logger.info(f"Logger initialized for {component_name} - level: {log_level}")
@@ -73,25 +74,73 @@ def setup_logging(
     
     return logger
 
-def get_logger(
-    component_name: str, 
-    log_config: Optional[Dict[str, Any]] = None,
-    output_manager = None
-) -> logging.Logger:
-    """Get properly configured logger for a component."""
-    # Use component_name as a cache key to avoid creating duplicate loggers
+def get_logger(component_name, log_config=None, output_manager=None):
+    # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
     
     # If this logger is already configured, return it
     if logger.handlers:
         return logger
         
-    # Otherwise, configure it
+    # Prevent propagation to parent loggers to avoid duplication
+    logger.propagate = False
+    
+    # Use a simple default configuration during initialization
+    if component_name.endswith('.config'):
+        # For config loggers, use a simple default configuration
+        setup_logging(
+            log_level="INFO",
+            log_dir="./logs",
+            component_name=component_name,
+            console_output=True
+        )
+        return logger
+    
+    # For other loggers, try to get configuration
     try:
-        # Import configuration here to avoid circular imports
-        from .config_manager import ConfigurationManager
-        config_manager = ConfigurationManager(project_name="axeScraper")
-        config = config_manager.get_logging_config()
+        # Import here to avoid circular imports
+        from .config_manager import CONFIGMANAGER_INSTANCE
+        
+        # Use the existing instance if available, otherwise use default config
+        if CONFIGMANAGER_INSTANCE is not None:
+            config = CONFIGMANAGER_INSTANCE.get_logging_config()
+        else:
+            # Default configuration as fallback
+            config = {
+                "level": "INFO",
+                "console_output": True,
+                "rotating_logs": True,
+                "max_bytes": 10 * 1024 * 1024,
+                "backup_count": 5,
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "date_format": "%Y-%m-%d %H:%M:%S",
+                "components": {
+                    "crawler": {
+                        "level": "INFO",
+                        "log_file": "crawler.log"
+                    },
+                    "axe_analysis": {
+                        "level": "INFO",
+                        "log_file": "axe_analysis.log"
+                    },
+                    "report_analysis": {
+                        "level": "INFO",
+                        "log_file": "report_analysis.log"
+                    },
+                    "pipeline": {
+                        "level": "INFO",
+                        "log_file": "pipeline.log"
+                    },
+                    "auth_manager": {
+                        "level": "INFO",
+                        "log_file": "auth_manager.log"
+                    },
+                    "funnel_manager": {
+                        "level": "INFO",
+                        "log_file": "funnel_manager.log"
+                    }
+                }
+            }
     except ImportError:
         # Fallback configuration if config_manager can't be imported
         config = {
