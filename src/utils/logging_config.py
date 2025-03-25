@@ -40,32 +40,40 @@ def setup_logging(
     
     # Add file handler if log_dir is specified
     if log_dir:
-        log_dir_path = Path(log_dir)
-        log_dir_path.mkdir(parents=True, exist_ok=True)
-        
-        if log_file is None:
-            log_file = f"{component_name}.log"
+        try:
+            # Convert to Path and ensure directory exists
+            log_dir_path = Path(log_dir)
+            log_dir_path.mkdir(parents=True, exist_ok=True)
             
-        log_file_path = log_dir_path / log_file
-        
-        if rotating_logs:
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file_path,
-                maxBytes=max_bytes,
-                backupCount=backup_count
-            )
-        else:
-            file_handler = logging.FileHandler(log_file_path)
+            if log_file is None:
+                log_file = f"{component_name}.log"
+                
+            log_file_path = log_dir_path / log_file
             
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+            print(f"Setting up log file for {component_name} at: {log_file_path}")
+            
+            if rotating_logs:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    log_file_path,
+                    maxBytes=max_bytes,
+                    backupCount=backup_count
+                )
+            else:
+                file_handler = logging.FileHandler(log_file_path)
+                
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            print(f"Successfully added file handler for {component_name}")
+        except Exception as e:
+            print(f"Error setting up log file for {component_name}: {e}")
+            # Continue with console logging even if file logging fails
     
     # Add console handler if requested
     if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
-    
+
     # Log startup message
     logger.info(f"Logger initialized for {component_name} - level: {log_level}")
     if log_dir:
@@ -73,66 +81,44 @@ def setup_logging(
     
     return logger
 
-def get_logger(
-    component_name: str, 
-    log_config: Optional[Dict[str, Any]] = None,
-    output_manager = None
-) -> logging.Logger:
-    """Get properly configured logger for a component."""
-    # Use component_name as a cache key to avoid creating duplicate loggers
+def get_logger(component_name, log_config=None, output_manager=None):
+    """Get properly configured logger with file output."""
+    # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
     
     # If this logger is already configured, return it
     if logger.handlers:
         return logger
         
-    # Otherwise, configure it
-    try:
-        # Import configuration here to avoid circular imports
-        from .config_manager import ConfigurationManager
-        config_manager = ConfigurationManager(project_name="axeScraper")
-        config = config_manager.get_logging_config()
-    except ImportError:
-        # Fallback configuration if config_manager can't be imported
-        config = {
-            "level": "INFO",
-            "console_output": True,
-            "rotating_logs": True,
-            "max_bytes": 10 * 1024 * 1024,
-            "backup_count": 5,
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            'datefmt': '%Y-%m-%d %H:%M:%S',
-            "components": {}
-        }
+    # Prevent propagation to parent loggers to avoid duplication
+    logger.propagate = False
     
-    # Merge with provided config
+    # Default log configuration
+    log_level = "INFO"
+    log_file = f"{component_name}.log"
+    
+    # Get component-specific configuration if available
     if log_config:
-        for key, value in log_config.items():
-            config[key] = value
+        log_level = log_config.get("level", log_level)
+        log_file = log_config.get("log_file", log_file)
     
-    # Get log directory from output_manager if provided
+    # Determine log directory - create it explicitly
+    log_dir = "./logs"  # Default fallback
+    
     if output_manager:
-        log_dir = output_manager.get_path("logs")
-        log_file = f"{component_name}.log"
-    else:
-        log_dir = config.get("log_dir", "./logs")
-        # Get component-specific log file if specified
-        component_config = config.get("components", {}).get(component_name, {})
-        log_file = component_config.get("log_file", f"{component_name}.log")
+        try:
+            # Explicitly ensure log directory exists
+            log_dir = output_manager.ensure_log_path_exists(component_name)
+            print(f"Using output_manager log path for {component_name}: {log_dir}")
+        except Exception as e:
+            print(f"Error getting log path from output_manager: {e}")
     
-    # Get component-specific log level if available
-    log_level = config.get("components", {}).get(component_name, {}).get("level", config.get("level", "INFO"))
-    
-    # Set up logging with merged configuration
+    # Set up logging with explicit path creation
     return setup_logging(
         log_level=log_level,
         log_dir=log_dir,
         log_file=log_file,
         component_name=component_name,
-        console_output=config.get("console_output", True),
-        rotating_logs=config.get("rotating_logs", True),
-        max_bytes=config.get("max_bytes", 10 * 1024 * 1024),
-        backup_count=config.get("backup_count", 5),
-        log_format=config.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s"),
-        date_format=config.get("date_format", "%Y-%m-%d %H:%M:%S")
+        console_output=True,
+        rotating_logs=True
     )

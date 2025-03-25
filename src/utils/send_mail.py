@@ -1,14 +1,9 @@
 import logging
 import subprocess
 from .config import EMAIL_CONFIG
+from .logging_config import get_logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-
-logger = logging.getLogger(__name__)
+logger = get_logger("email_sender")
 
 def send_email_report(excel_files, recipient_email=EMAIL_CONFIG["recipient_email"]):
     
@@ -23,4 +18,4 @@ def send_email_report(excel_files, recipient_email=EMAIL_CONFIG["recipient_email
         logger.error("Errore nell'invio dell'email.")
         
 if __name__ == "__main__":
-    send_email_report(["/home/ec2-user/axeScraper/output/locautorent_com/markdown_output/site_locauto_v2.md", "/home/ec2-user/axeScraper/save/locauto/site_locauto_v1.md"])
+    send_email_report(["/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/final_analysis_locautorent_com.xlsx"])

@@ -7,8 +7,20 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, TypeVar, Set, Callable
 import datetime
+from utils.config_schema_additions import CONFIG_SCHEMA_ADDITIONS
 
 T = TypeVar('T')
+_CONFIG_MANAGER_INSTANCE = None
+_INITIALIZING = False  # Flag to prevent recursion
+
+def get_config_manager(project_name="axeScraper", config_file=None, cli_args=None):
+    global _CONFIG_MANAGER_INSTANCE, _INITIALIZING
+    if _CONFIG_MANAGER_INSTANCE is None and not _INITIALIZING:
+        _INITIALIZING = True  # Set flag before initializing
+        _CONFIG_MANAGER_INSTANCE = ConfigurationManager(project_name, config_file, cli_args=cli_args)
+        _INITIALIZING = False  # Reset flag after initialization
+    return _CONFIG_MANAGER_INSTANCE
+
 
 # Definizione dello schema di configurazione
 DEFAULT_CONFIG_SCHEMA = {
@@ -132,19 +144,28 @@ class ConfigurationManager:
         self.config_file = self._find_config_file(config_file)
         self.cli_args = cli_args or {}
         
-        # Inizializza schema di configurazione
-        self.config_schema = config_schema or DEFAULT_CONFIG_SCHEMA
+        # Initialize schema with default schema and additions
+        base_schema = DEFAULT_CONFIG_SCHEMA.copy()
+        
+        # Add authentication and funnel schema
+        base_schema.update(CONFIG_SCHEMA_ADDITIONS)
+        
+        # Use custom schema if provided, otherwise use the enhanced base schema
+        self.config_schema = config_schema or base_schema
         
         # Alias mapping
         self.aliases = self._build_alias_mapping()
         
-        # Configura il logger
+        # Set up a simple logger directly without using get_logger() function
         self.logger = logging.getLogger(f"{project_name}.config")
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
+            self.logger.propagate = False  # Prevent propagation
+
         
         # Informazioni sul sistema
         self.cpu_count = multiprocessing.cpu_count()
@@ -718,12 +739,7 @@ class ConfigurationManager:
         }
     
     def get_logging_config(self) -> Dict[str, Any]:
-        """
-        Ottiene la configurazione del logging.
-        
-        Returns:
-            Configurazione del logging
-        """
+        """Get logging configuration with explicit file names."""
         output_root = self.get_path("OUTPUT_DIR", "~/axeScraper/output")
         log_dir = self.get_path("LOG_DIR", output_root / "logs", create=True)
         
@@ -737,7 +753,7 @@ class ConfigurationManager:
             "max_bytes": self.get_int("LOG_MAX_BYTES", 10 * 1024 * 1024),  # 10 MB
             "backup_count": self.get_int("LOG_BACKUP_COUNT", 5),
             
-            # Livelli di log specifici per componente
+            # Clear, explicit component log files
             "components": {
                 "crawler": {
                     "level": self.get("CRAWLER_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
@@ -754,10 +770,18 @@ class ConfigurationManager:
                 "pipeline": {
                     "level": self.get("PIPELINE_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
                     "log_file": "pipeline.log"
+                },
+                "auth_manager": {
+                    "level": self.get("AUTH_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
+                    "log_file": "auth_manager.log"
+                },
+                "funnel_manager": {
+                    "level": self.get("FUNNEL_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
+                    "log_file": "funnel_manager.log"
                 }
             }
         }
-    
+        
     def get_email_config(self) -> Dict[str, Any]:
         """
         Ottiene la configurazione dell'email.
@@ -833,3 +857,6 @@ class ConfigurationManager:
         self.logger.info(f"Soglia Selenium: {self.get_int('CRAWLER_PENDING_THRESHOLD')}")
         self.logger.info(f"Email destinatario: {self.get('EMAIL_RECIPIENT', 'non impostato')}")
         self.logger.info("=== Fine Riepilogo ===")
+
+# Create a global instance for direct import
+CONFIGMANAGER_INSTANCE = get_config_manager()

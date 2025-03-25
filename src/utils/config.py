@@ -317,7 +317,7 @@ PIPELINE_CONFIG = {
 
 # Email configuration
 EMAIL_CONFIG = {
-    "recipient_email": get_env("AXE_EMAIL_RECIPIENT", "example@example.com"),
+    "recipient_email": get_env("AXE_EMAIL_RECIPIENT", "roma.01@sapglegal.com"),
     "subject": get_env("AXE_EMAIL_SUBJECT", "Accessibility Reports"),
     "body": get_env("AXE_EMAIL_BODY", "The accessibility reports are completed. Please find the Excel files attached."),
     "smtp_server": get_env("AXE_SMTP_SERVER", "localhost"),

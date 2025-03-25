@@ -1,18 +1,17 @@
 {
   "BASE_URLS": [
-    "https://www.iccreabanca.it/it-IT/Pagine/default.aspx",
-    "https://www.henryschein-dental.de/"
+    "https://www.locautorent.com/"
   ],
   "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
   "START_STAGE": "crawler",
   "REPEAT_ANALYSIS": 1,
+  
   "RESOURCE_MONITORING": true,
   "RESOURCE_CHECK_INTERVAL": 5,
   "CPU_THRESHOLD": 85,
   "MEMORY_THRESHOLD": 80,
   "COOL_DOWN_TIME": 10,
   
-  "LOG_DIR":"home/ec2-user/axeScraper/output/logs",
   "LOG_LEVEL": "INFO",
   "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
   "LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
@@ -24,27 +23,150 @@
   "ANALYSIS_LOG_LEVEL": "INFO",
   "REPORT_LOG_LEVEL": "INFO",
   "PIPELINE_LOG_LEVEL": "INFO",
+  "AUTH_LOG_LEVEL": "DEBUG",
+  "FUNNEL_LOG_LEVEL": "DEGUB",
   
   "EMAIL_RECIPIENT": "roma.01@sapglegal.com",
-  "EMAIL_SUBJECT": "Accessibility Reports",
-  "EMAIL_BODY": "The accessibility reports are ready.",
-  "SMTP_SERVER": "smtp.example.com",
-  "SMTP_PORT": 587,
-  "SMTP_USERNAME": "user@example.com",
-  "SMTP_PASSWORD": "securepassword",
-  "SMTP_TLS": true,
-  "MUTT_COMMAND": "mutt -s",
+  "EMAIL_SUBJECT": "Accessibility Analysis Report",
+  "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
   
   "CRAWLER_MAX_WORKERS": 16,
-  "CRAWLER_MAX_URLS": 100,
+  "CRAWLER_MAX_URLS": 500,
   "CRAWLER_MAX_RETRIES": 10,
   "CRAWLER_REQUEST_DELAY": 0.5,
   "CRAWLER_HYBRID_MODE": true,
-  "CRAWLER_PENDING_THRESHOLD": 250,
+  "CRAWLER_PENDING_THRESHOLD": 300,
   
-  "AXE_MAX_TEMPLATES": 50,
+  "AXE_MAX_TEMPLATES": 500000,
   "AXE_POOL_SIZE": 5,
   "AXE_SLEEP_TIME": 1.0,
   "AXE_HEADLESS": true,
-  "AXE_RESUME": true
+  "AXE_RESUME": true,
+  
+  "AUTH_ENABLED": true,
+  "AUTH_STRATEGY": "form",
+  "AUTH_LOGIN_URL": "https://www.locautorent.com/it/mylocauto/#/auth/login",
+  "AUTH_USERNAME": "guglielmo.puzio00@gmail.com",
+  "AUTH_PASSWORD": "1407megu",
+  "AUTH_USERNAME_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.textInput > div > div > input[type=text]",
+  "AUTH_PASSWORD_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.passwordInput > div > div > input[type=password]",
+  "AUTH_SUBMIT_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > a",
+  "AUTH_SUCCESS_INDICATOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.asideContent > aside > div > ul > li:nth-child(2) > a",
+  "AUTH_ERROR_INDICATOR": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a",
+  
+  "AUTH_PRE_LOGIN_ACTIONS": [
+    {"type": "wait", "seconds": 2},
+    {"type": "cookie_banner"},
+    {"type": "wait", "seconds": 1}
+  ],
+  
+  "AUTH_POST_LOGIN_ACTIONS": [
+    {"type": "wait", "seconds": 3},
+    {"type": "screenshot", "filename": "post_login.png"}
+  ],
+  
+  "AUTH_DOMAINS": {
+    "locautorent_com": {
+      "restricted_urls": [
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/profile",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/account",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/register-booking",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/new-trips",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/rentals",
+        "https://www.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
+      ],
+      "explore_restricted_area": true
+    }
+  },
+
+  "RESTRICTED_AREA_PATTERNS": [
+    "/account",
+    "/dashboard",
+    "/profile",
+    "/settings",
+    "/members"
+  ],
+
+  "FUNNEL_ANALYSIS_ENABLED": true,
+  
+  "FUNNELS": {
+    "account_creation": {
+      "description": "Sign-up process from landing page to account creation",
+      "domain": "locautorent_com",
+      "auth_required": false,
+      "steps": [
+        {
+          "name": "LandingPage",
+          "url": "https://www.locautorent.com/it/ab-testing-enable-version/?code=9N0C47hqP2o5HTU4QhPx0K1b&version=v1",
+          "wait_for_selector": "#header > div.wrapper > div > div:nth-child(3) > a",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 2},
+            {"type": "screenshot", "filename": "landing_page.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#header > div.wrapper > div > div:nth-child(3) > a"
+          }
+        },
+        {
+          "name": "ClickLogin",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#header > div.wrapper > div > div:nth-child(3) > a"},
+            {"type": "wait", "seconds": 3},
+            {"type": "screenshot", "filename": "login_form.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#app > div > div.MylocautoLoginModal.v--modal-overlay > div > div.v--modal-box.v--modal > div > div.CustomerCareForm.simpleVariant.loginInModal > h3"
+          }
+        },
+        {
+          "name": "ClickSignUp",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#app > div > div.MylocautoLoginModal.v--modal-overlay > div > div.v--modal-box.v--modal > div > div.CustomerCareForm.simpleVariant.loginInModal > form > div.subtitleinmodal > p > a"},
+            {"type": "wait", "seconds": 3},
+            {"type": "screenshot", "filename": "signup_form.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div"
+          }
+        },
+        {
+          "name": "FillSignupForm",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(2) > div > div > input[type=text]", "value": "Test Name"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(3) > div > div > input[type=text]", "value": "Test Surname"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(4) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(5) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(6) > div > div > input[type=password]", "value": "Securepassword123!"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(7) > div > div > input[type=password]", "value": "Securepassword123!"},
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.checkboxsWrapper > div:nth-child(1) > label > i"},
+            {"type": "screenshot", "filename": "filled_form.png"}
+          ],
+          "success_condition": {
+            "type": "element_clickable",
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.registerCtaWrapper > a"
+          }
+        },
+        {
+          "name": "SubmitForm",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.registerCtaWrapper > a"},
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "after_submit.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div > div > div > input[type=text]"
+          }
+        }
+      ]
+    }
+  }
 }

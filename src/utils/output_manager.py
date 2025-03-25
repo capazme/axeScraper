@@ -41,7 +41,10 @@ class OutputManager:
             "logs": self.base_dir / self.domain_slug / "logs",
             "charts": self.base_dir / self.domain_slug / "charts",
             "temp": self.base_dir / self.domain_slug / "temp",
+            "screenshots": self.base_dir / self.domain_slug / "screenshots",  
+            "funnels": self.base_dir / self.domain_slug / "funnels",  
         }
+
         
         # Apply any configuration overrides
         if config:
@@ -73,15 +76,32 @@ class OutputManager:
             directory.mkdir(parents=True, exist_ok=True)
             self.logger.debug(f"Created directory for {component}: {directory}")
     
-    def get_path(self, component: str, filename: Optional[str] = None) -> Path:
-        """Get path for a specific component, optionally with a filename."""
-        if component not in self.structure:
-            raise ValueError(f"Unknown component: {component}")
-            
-        path = self.structure[component]
+    def validate_path(self, path: Path) -> Path:
+        """Ensure a path exists and is valid."""
+        if path is None:
+            raise ValueError("Path cannot be None")
         
-        if filename:
-            return path / filename
+        # Ensure parent directory exists
+        if not path.is_dir():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        
+        return path
+    
+    def get_path(self, component: str, *path_elements) -> Path:
+        """Get path for a specific component with consistent handling."""
+        if component not in self.structure:
+            # Ensure logs always go to the same place
+            if component == "logs":
+                path = self.structure.get("logs", self.base_dir / self.domain_slug / "logs")
+            else:
+                raise ValueError(f"Unknown component: {component}")
+        else:
+            path = self.structure[component]
+        
+        # Handle path elements normally
+        valid_elements = [str(element) for element in path_elements if element is not None]
+        if valid_elements:
+            return path.joinpath(*valid_elements)
         
         return path
     
@@ -93,6 +113,16 @@ class OutputManager:
         filename = f"{base_filename}_{self.timestamp}{ext}"
         return self.get_path(component, filename)
     
+    def ensure_log_path_exists(self, component_name: str) -> Path:
+        """Ensure log directory exists and return path for component log file."""
+        log_dir = self.get_path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Print debug info
+        print(f"Log directory for {component_name}: {log_dir}")
+        
+        return log_dir
+
     def backup_existing_file(self, component: str, filename: str, max_backups: int = 5) -> Optional[Path]:
         """Backup an existing file if it exists."""
         file_path = self.get_path(component, filename)
@@ -137,38 +167,83 @@ class OutputManager:
                 except Exception as e:
                     self.logger.warning(f"Error removing old backup {old_backup}: {e}")
     
-    def safe_write_file(self, component: str, filename: str, content: str, 
-                        encoding: str = "utf-8", backup: bool = True) -> Path:
-        """Write content to a file safely, creating a backup first."""
-        path = self.get_path(component, filename)
+    def safe_write_file(self, path: Union[Path, str], content: str, encoding: str = "utf-8") -> bool:
+        """
+        Safely write content to a file, ensuring the directory exists.
         
-        # Create backup if needed
-        if backup and path.exists():
-            self.backup_existing_file(component, filename)
+        Args:
+            path: Path to write to
+            content: Content to write
+            encoding: File encoding to use
         
-        # Write to temporary file first
-        temp_path = path.with_suffix(f"{path.suffix}.tmp")
-        temp_path.write_text(content, encoding=encoding)
-        
-        # Replace the original file with the temporary file
-        temp_path.replace(path)
-        self.logger.debug(f"Safely wrote content to {path}")
-        
-        return path
-    
-    def ensure_path_exists(self, component: str, filename: Optional[str] = None) -> Path:
-        """Ensure a path exists, creating any necessary directories."""
-        path = self.get_path(component, filename)
-        
-        if filename:
-            # If a filename is included, ensure the parent directory exists
-            path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # If no filename, ensure the directory itself exists
-            path.mkdir(parents=True, exist_ok=True)
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Convert to Path object if string
+            path = Path(path)
             
+            # Ensure parent directory exists
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write content to file
+            path.write_text(content, encoding=encoding)
+            self.logger.debug(f"Successfully wrote content to {path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error writing file {path}: {e}")
+            return False
+
+    def ensure_path_exists(self, component: str, filename: Optional[str] = None) -> Path:
+        """
+        Ensure a path exists, creating any necessary directories.
+        
+        Args:
+            component: Component name to get base path
+            filename: Optional filename to append
+            
+        Returns:
+            Path that is guaranteed to exist
+        """
+        if filename is None:
+            # If no filename, ensure the directory itself exists
+            path = self.get_path(component)
+            path.mkdir(parents=True, exist_ok=True)
+        else:
+            # If a filename is included, ensure the parent directory exists
+            path = self.get_path(component, filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+                
         return path
     
+    def ensure_nested_path_exists(self, component: str, *subpaths) -> Path:
+        """
+        Ensure a nested path exists, creating all necessary directories.
+        
+        Args:
+            component: Base component name
+            *subpaths: Variable number of subdirectory names
+            
+        Returns:
+            Path: Complete path with all directories created
+        """
+        # Get the base component path
+        base_path = self.get_path(component)
+        
+        # Start with the base path
+        current_path = base_path
+        
+        # Create each level of subdirectory
+        for subpath in subpaths:
+            if subpath is not None:
+                current_path = current_path / str(subpath)
+        
+        # Ensure all directories exist
+        current_path.mkdir(parents=True, exist_ok=True)
+        
+        return current_path
+
     def find_latest_file(self, component: str, pattern: str) -> Optional[Path]:
         """Find the most recently modified file matching a pattern."""
         directory = self.get_path(component)

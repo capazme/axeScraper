@@ -433,7 +433,19 @@ class MultiDomainSpider(scrapy.Spider):
         # Check domain URL limit
         if self.max_urls_per_domain and self.domain_counts[current_domain] >= self.max_urls_per_domain:
             self.logger.debug(f"URL limit reached for domain {current_domain}")
+            
+            # Check if all domains have reached their limits
+            all_domains_at_limit = all(
+                self.domain_counts.get(domain, 0) >= self.max_urls_per_domain
+                for domain in self.domains
+            )
+            
+            if all_domains_at_limit:
+                self.logger.info(f"All domains have reached their URL limits")
+                raise CloseSpider("All domains have reached URL limits")
+                
             return
+
             
         # Check total URL limit
         if self.max_total_urls and self.processed_count >= self.max_total_urls:
