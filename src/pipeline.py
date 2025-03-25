@@ -23,6 +23,7 @@ from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from pathlib import Path
 import traceback
 import pandas as pd
+import re
 
 # Import delle classi centrali di gestione
 from utils.config_manager import ConfigurationManager
@@ -337,6 +338,137 @@ class Pipeline:
             # Rimuovi processo dal tracking
             self.running_processes.pop(base_url, None)
     
+    def collect_funnel_html_files(self, funnel_id: str, output_manager: OutputManager) -> List[Tuple[str, str, Path]]:
+        """
+        Collect HTML snapshots from funnel directories for analysis.
+        
+        Args:
+            funnel_id: ID of the funnel
+            output_manager: Output manager for path handling
+            
+        Returns:
+            List of (step_name, step_number, file_path) tuples
+        """
+        funnel_directory = output_manager.get_path("funnels", funnel_id)
+        self.logger.info(f"Collecting HTML files from funnel directory: {funnel_directory}")
+        
+        html_files = []
+        
+        if not funnel_directory.exists():
+            self.logger.warning(f"Funnel directory not found: {funnel_directory}")
+            return html_files
+            
+        # Find all HTML files in the directory
+        for html_file in funnel_directory.glob("*.html"):
+            file_name = html_file.name
+            
+            # Extract step information from filename
+            # Expected format: step_1_stepname.html
+            match = re.match(r'step_(\d+)_(.+)\.html', file_name)
+            if match:
+                step_number = match.group(1)
+                step_name = match.group(2).replace('_', ' ')
+                html_files.append((step_name, step_number, html_file))
+            else:
+                self.logger.warning(f"Couldn't parse step information from filename: {file_name}")
+        
+        # Sort by step number
+        html_files.sort(key=lambda x: int(x[1]))
+        
+        self.logger.info(f"Found {len(html_files)} HTML files for funnel {funnel_id}")
+        return html_files
+    
+    async def analyze_funnel_html_files(
+    self, 
+    funnel_id: str, 
+    html_files: List[Tuple[str, str, Path]], 
+    output_manager: OutputManager
+) -> pd.DataFrame:
+        """
+        Analyze HTML files from a funnel for accessibility issues.
+        
+        Args:
+            funnel_id: ID of the funnel
+            html_files: List of (step_name, step_number, file_path) tuples
+            output_manager: Output manager for path handling
+            
+        Returns:
+            DataFrame with accessibility analysis results
+        """
+        from selenium import webdriver
+        from axe_selenium_python import Axe
+        
+        self.logger.info(f"Analyzing {len(html_files)} HTML files for funnel {funnel_id}")
+        
+        # Initialize webdriver
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=options)
+        
+        all_violations = []
+        
+        try:
+            for step_name, step_number, html_file in html_files:
+                self.logger.info(f"Analyzing funnel step: {step_name} (file: {html_file.name})")
+                
+                # Load HTML file directly
+                file_url = f"file://{html_file.absolute()}"
+                driver.get(file_url)
+                
+                # Wait for page to load
+                await asyncio.sleep(1)
+                
+                # Run axe analysis
+                axe = Axe(driver)
+                axe.inject()
+                results = axe.run()
+                
+                # Process violations
+                for violation in results.get("violations", []):
+                    for node in violation.get("nodes", []):
+                        issue = {
+                            "page_url": file_url,  # Use file URL as identifier
+                            "funnel_name": funnel_id,
+                            "funnel_step": step_name,
+                            "step_number": step_number,
+                            "has_funnel_data": True,
+                            "violation_id": violation.get("id", ""),
+                            "impact": violation.get("impact", ""),
+                            "description": violation.get("description", ""),
+                            "help": violation.get("help", ""),
+                            "target": ", ".join([", ".join(x) if isinstance(x, list) else x 
+                                            for x in node.get("target", [])]),
+                            "html": node.get("html", ""),
+                            "failure_summary": node.get("failureSummary", "")
+                        }
+                        all_violations.append(issue)
+                
+                self.logger.info(f"Found {len(all_violations)} violations in step {step_name}")
+                
+            # Create DataFrame from all violations
+            if all_violations:
+                df = pd.DataFrame(all_violations)
+                
+                # Save to Excel file
+                excel_path = output_manager.get_path(
+                    "analysis", f"funnel_{funnel_id}_accessibility.xlsx")
+                with pd.ExcelWriter(excel_path) as writer:
+                    df.to_excel(writer, index=False)
+                    
+                self.logger.info(f"Saved funnel analysis to {excel_path}")
+                return df
+            else:
+                self.logger.info(f"No violations found in funnel {funnel_id}")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            self.logger.exception(f"Error analyzing funnel HTML files: {e}")
+            return pd.DataFrame()
+        finally:
+            driver.quit()
+    
     async def run_axe_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
         """
         Esegue l'analisi Axe con gestione standardizzata dei percorsi e gestione errori migliorata.
@@ -430,28 +562,30 @@ class Pipeline:
             return False
     
     async def run_report_analysis(self, base_url: str, domain_config: Dict[str, Any], 
-                                output_manager: OutputManager, 
-                                funnel_metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[str]:
+                          output_manager: OutputManager, 
+                          funnel_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+                          funnel_violations_df: Optional[pd.DataFrame] = None) -> Optional[str]:
         """
-        Genera il report finale di accessibilità con gestione standardizzata dei percorsi.
+        Generates the final report of accessibility with standardized path management.
         
         Args:
-            base_url: URL target
-            domain_config: Configurazione specifica del dominio
-            output_manager: Gestore dell'output
+            base_url: Target URL
+            domain_config: Domain-specific configuration
+            output_manager: Output manager instance
+            funnel_metadata: Optional metadata about funnels
+            funnel_violations_df: Optional DataFrame with funnel HTML analysis results
             
         Returns:
-            Percorso del report generato o None
+            Path to the generated report or None
         """
-        self.logger.info(f"Generazione report finale per {base_url}")
+        self.logger.info(f"Generating final report for {base_url}")
         
-        # Ottieni configurazione report
-        report_config = domain_config.get("report_config", {})
+        # Ensure funnel_metadata is a dictionary, not None
+        funnel_metadata = funnel_metadata or {}
         
-        # Ottieni percorsi standardizzati
+        # Get standardized paths
         input_excel = str(output_manager.get_path(
             "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
-        # Percorso per il file Excel concatenato
         concat_excel = str(output_manager.get_path(
             "analysis", f"accessibility_report_{output_manager.domain_slug}_concat.xlsx"))
         output_excel = str(output_manager.get_path(
@@ -460,23 +594,19 @@ class Pipeline:
             "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
         charts_dir = str(output_manager.get_path("charts"))
         
-        # Assicura che le directory esistano
-        output_manager.ensure_path_exists("analysis")
-        output_manager.ensure_path_exists("charts")
-        
-        # Verifica dipendenze
-        if not os.path.exists(input_excel):
-            self.logger.error(f"Report Axe richiesto non trovato: {input_excel}")
-            return None
+        # Add funnel metadata to Excel file
+        if funnel_metadata:
+            self.logger.info(f"Adding funnel metadata to Excel for {len(funnel_metadata)} URLs")
+            self._add_funnel_metadata_to_axe_results(input_excel, funnel_metadata)
         
         try:
-            # NUOVO PASSAGGIO: Concatenare i fogli Excel dall'output di Axe
+            # STEP 1: Concatenate sheets from main Excel file
             from utils.concat import concat_excel_sheets
-            self.logger.info(f"Concatenazione fogli Excel da {input_excel}")
+            self.logger.info(f"Concatenating sheets from {input_excel}")
             concat_excel_path = concat_excel_sheets(file_path=input_excel, output_path=concat_excel)
-            self.logger.info(f"Fogli Excel concatenati e salvati in {concat_excel_path}")
+            self.logger.info(f"Sheets concatenated and saved to {concat_excel_path}")
             
-            # Crea analyzer con output manager
+            # STEP 2: Load main analysis data
             analyzer = AccessibilityAnalyzer(output_manager=output_manager)
             
             # Set funnel metadata if provided
@@ -484,32 +614,59 @@ class Pipeline:
                 analyzer.funnel_metadata = funnel_metadata
                 self.logger.info(f"Added funnel metadata for {len(funnel_metadata)} URLs")
             
-            # Esegui pipeline di analisi con progressione chiara
-            self.logger.info(f"Caricamento dati accessibilità per {base_url}")
-            # Usa il file Excel concatenato invece dell'originale
+            # Load and process the data
+            self.logger.info(f"Loading accessibility data for {base_url}")
             axe_df = analyzer.load_data(concat_excel_path, crawler_state)
             
-            self.logger.info(f"Calcolo metriche per {base_url}")
+            # STEP 3: Merge funnel HTML analysis results if available
+            if funnel_violations_df is not None and not funnel_violations_df.empty:
+                self.logger.info(f"Integrating {len(funnel_violations_df)} funnel violations into analysis")
+                
+                # Ensure common columns exist in both DataFrames
+                required_columns = ['violation_id', 'impact', 'page_url', 'description', 'help', 'target', 'html', 'failure_summary']
+                
+                # Verify all required columns exist in both DataFrames
+                missing_in_axe = [col for col in required_columns if col not in axe_df.columns]
+                missing_in_funnel = [col for col in required_columns if col not in funnel_violations_df.columns]
+                
+                if missing_in_axe or missing_in_funnel:
+                    self.logger.warning(f"Missing columns in DataFrames: axe_df: {missing_in_axe}, funnel_df: {missing_in_funnel}")
+                    self.logger.warning("Will only concatenate compatible columns")
+                    
+                    # Find common columns
+                    common_columns = [col for col in axe_df.columns if col in funnel_violations_df.columns]
+                    
+                    # Add missing columns to funnel_violations_df with None values
+                    for col in axe_df.columns:
+                        if col not in funnel_violations_df.columns:
+                            funnel_violations_df[col] = None
+                
+                # Concatenate DataFrames
+                axe_df = pd.concat([axe_df, funnel_violations_df], ignore_index=True)
+                self.logger.info(f"Combined DataFrame now has {len(axe_df)} rows")
+            
+            # Continue with analysis as before
+            self.logger.info(f"Calculating metrics for {base_url}")
             metrics = analyzer.calculate_metrics(axe_df)
             
-            self.logger.info(f"Creazione aggregazioni dati per {base_url}")
+            self.logger.info(f"Creating data aggregations for {base_url}")
             aggregations = analyzer.create_aggregations(axe_df)
             
-            self.logger.info(f"Generazione grafici per {base_url}")
+            self.logger.info(f"Generating charts for {base_url}")
             chart_files = analyzer.create_charts(metrics, aggregations, axe_df)
             
-            # Carica dati template se disponibili
+            # Load template data if available
             template_df = None
             if os.path.exists(crawler_state):
                 try:
-                    self.logger.info(f"Caricamento dati struttura template per {base_url}")
+                    self.logger.info(f"Loading template structure data for {base_url}")
                     templates_df, state = analyzer.load_template_data(crawler_state)
                     template_df = analyzer.analyze_templates(templates_df, axe_df)
                 except Exception as e:
-                    self.logger.warning(f"Analisi template fallita (non critica): {e}")
+                    self.logger.warning(f"Template analysis failed (non-critical): {e}")
             
-            # Genera report Excel finale
-            self.logger.info(f"Creazione report Excel finale per {base_url}")
+            # Generate final report
+            self.logger.info(f"Creating final Excel report for {base_url}")
             report_path = analyzer.generate_report(
                 axe_df=axe_df,
                 metrics=metrics,
@@ -519,13 +676,13 @@ class Pipeline:
                 output_excel=output_excel
             )
             
-            self.logger.info(f"Report finale generato: {report_path}")
+            self.logger.info(f"Final report generated: {report_path}")
             return report_path
             
         except Exception as e:
-            self.logger.exception(f"Errore generando report finale: {e}")
-            return None
-    
+            self.logger.exception(f"Error generating final report: {e}")
+            return None   
+        
     async def run_authentication(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
         """Perform authentication for a domain."""
         self.logger.info(f"Initializing authentication for {base_url}")
@@ -565,6 +722,7 @@ class Pipeline:
             
         results = {}
         funnel_metadata = {}  # Store URL -> funnel mappings
+        all_funnel_violations = []
         
         try:
             self.funnel_manager = FunnelManager(
@@ -588,6 +746,8 @@ class Pipeline:
                     break
                     
                 self.logger.info(f"Executing funnel: {funnel_id}")
+                
+                # Execute the funnel
                 funnel_results = self.funnel_manager.execute_funnel(funnel_id)
                 results[funnel_id] = funnel_results
                 
@@ -600,14 +760,39 @@ class Pipeline:
                             'success': success
                         }
                 
+                # Now analyze the HTML files from this funnel
+                html_files = self.collect_funnel_html_files(funnel_id, output_manager)
+                
+                if html_files:
+                    self.logger.info(f"Analyzing {len(html_files)} HTML files from funnel {funnel_id}")
+                    funnel_violations_df = await self.analyze_funnel_html_files(funnel_id, html_files, output_manager)
+                    
+                    # Add to the overall list of violations
+                    if not funnel_violations_df.empty:
+                        all_funnel_violations.append(funnel_violations_df)
+                
                 success_count = sum(1 for _, _, success in funnel_results if success)
                 total_steps = len(funnel_results)
                 self.logger.info(f"Funnel {funnel_id}: {success_count}/{total_steps} steps successful")
             
+            # Combine all funnel violations into a single DataFrame
+            combined_violations = pd.DataFrame()
+            if all_funnel_violations:
+                combined_violations = pd.concat(all_funnel_violations, ignore_index=True)
+                
+                # Save combined analysis
+                combined_path = output_manager.get_path(
+                    "analysis", f"all_funnels_accessibility.xlsx")
+                with pd.ExcelWriter(combined_path) as writer:
+                    combined_violations.to_excel(writer, index=False)
+                
+                self.logger.info(f"Saved combined funnel analysis to {combined_path}")
+            
             return {
                 'enabled': True,
                 'funnels': results,
-                'metadata': funnel_metadata
+                'metadata': funnel_metadata,
+                'violations_df': combined_violations
             }
                 
         except Exception as e:
@@ -616,7 +801,7 @@ class Pipeline:
         finally:
             if self.funnel_manager:
                 self.funnel_manager.close()
-
+                
     def _add_funnel_metadata_to_axe_results(self, excel_path: Union[str, Path], funnel_metadata: Dict[str, Dict[str, Any]]) -> bool:
         """Add funnel metadata to Axe Excel results."""
         if not excel_path or not funnel_metadata:
@@ -646,16 +831,21 @@ class Pipeline:
                     df['funnel_name'] = 'none'
                 if 'funnel_step' not in df.columns:
                     df['funnel_step'] = 'none'
+                if 'has_funnel_data' not in df.columns:
+                    df['has_funnel_data'] = False
                     
                 # Update rows with funnel information
                 for url, metadata in funnel_metadata.items():
+                    # Match both exact URLs and URLs containing the funnel URL (more robust matching)
                     mask = df['page_url'].apply(lambda x: str(x) == url or url in str(x))
                     if mask.any():
                         df.loc[mask, 'funnel_name'] = metadata.get('funnel_name', 'unknown')
                         df.loc[mask, 'funnel_step'] = metadata.get('funnel_step', 'unknown')
+                        df.loc[mask, 'has_funnel_data'] = True
                         
                 dfs[sheet_name] = df
             
+            # Write back to the Excel file
             with pd.ExcelWriter(excel_path) as writer:
                 for sheet_name, df in dfs.items():
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
@@ -666,7 +856,7 @@ class Pipeline:
         except Exception as e:
             self.logger.exception(f"Error adding funnel metadata to Excel file: {e}")
             return False
-
+        
     async def run_axe_analysis_on_urls(
         self, 
         base_url: str, 
@@ -802,11 +992,13 @@ class Pipeline:
         funnel_results = {}
         funnel_urls = []
         funnel_metadata = {}
+        funnel_violations_df = None
         if start_stage in ["crawler", "auth", "axe", "funnel"]:
             funnel_analysis_result = await self.run_funnel_analysis(base_url, domain_config, output_manager)
             if funnel_analysis_result.get('enabled', False):
                 funnel_results = funnel_analysis_result.get('funnels', {})
                 funnel_metadata = funnel_analysis_result.get('metadata', {})
+                funnel_violations_df = funnel_analysis_result.get('violations_df', None)
                 if self.funnel_manager:
                     funnel_urls = self.funnel_manager.get_all_visited_urls()
                     self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
@@ -884,12 +1076,13 @@ class Pipeline:
                 
                 # Generate report with funnel data
                 report_path = await self.run_report_analysis(
-                    base_url, 
-                    domain_config, 
-                    output_manager,
-                    funnel_metadata=funnel_metadata
-                )
-                
+                        base_url, 
+                        domain_config, 
+                        output_manager,
+                        funnel_metadata=funnel_metadata,
+                        funnel_violations_df=funnel_violations_df
+                    )
+   
                 if report_path:
                     self.logger.info(f"Report generated with funnel data for {base_url}: {report_path}")
                     return report_path

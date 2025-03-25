@@ -315,6 +315,11 @@ class AccessibilityAnalyzer:
         df = self._clean_data(df)
         if crawler_state:
             df = self._integrate_crawler_data(df, crawler_state)
+            
+        # Apply funnel metadata if present as attribute
+        if hasattr(self, 'funnel_metadata') and self.funnel_metadata and hasattr(self, 'apply_funnel_metadata'):
+            df = self.apply_funnel_metadata(self.funnel_metadata, df)
+            
         return df
     
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -414,7 +419,50 @@ class AccessibilityAnalyzer:
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
         return self.wcag_categories[key]['name'] if key else "Other"
     
-    # In src/analysis/report_analysis.py
+    def apply_funnel_metadata(self, funnel_metadata: Dict[str, Dict[str, Any]], df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply funnel metadata to the DataFrame during analysis.
+        
+        Args:
+            funnel_metadata: Dictionary mapping URLs to funnel data
+            df: DataFrame with accessibility data
+        
+        Returns:
+            DataFrame with enhanced funnel data
+        """
+        if not funnel_metadata:
+            return df
+            
+        self.logger.info(f"Applying funnel metadata to {len(df)} rows")
+        
+        # Add funnel columns if they don't exist
+        if 'funnel_name' not in df.columns:
+            df['funnel_name'] = 'none'
+        if 'funnel_step' not in df.columns:
+            df['funnel_step'] = 'none'
+        if 'has_funnel_data' not in df.columns:
+            df['has_funnel_data'] = False
+            
+        # Apply funnel metadata
+        modified_rows = 0
+        for url, metadata in funnel_metadata.items():
+            mask = df['page_url'].apply(lambda x: str(x) == url or url in str(x))
+            if mask.any():
+                df.loc[mask, 'funnel_name'] = metadata.get('funnel_name', 'unknown')
+                df.loc[mask, 'funnel_step'] = metadata.get('funnel_step', 'unknown')
+                df.loc[mask, 'has_funnel_data'] = True
+                modified_rows += mask.sum()
+        
+        # Add funnel-specific severity score
+        df['funnel_severity_score'] = df.apply(
+            lambda row: self.impact_weights.get(row['impact'], 0) * 1.5 
+            if row.get('has_funnel_data', False) else self.impact_weights.get(row['impact'], 0),
+            axis=1
+        )
+        
+        self.logger.info(f"Applied funnel metadata to {modified_rows} rows")
+        return df
+    
     def _integrate_crawler_data(self, df: pd.DataFrame, crawler_state: str) -> pd.DataFrame:
         """
         Integrate crawler data, e.g., templates and page depth.
@@ -505,6 +553,7 @@ class AccessibilityAnalyzer:
         except Exception as e:
             self.logger.error(f"Error integrating crawler data: {e}", exc_info=True)
             return df
+    
     def calculate_metrics(self, df: pd.DataFrame) -> Dict:
         """
         Calculate basic accessibility metrics including funnel analysis.
@@ -1013,7 +1062,92 @@ class AccessibilityAnalyzer:
                 self.logger.error(f"Error creating funnel aggregations: {e}")
         
         return aggregations
-
+    
+    def create_funnel_charts(self, funnel_metrics, aggregations, chart_dir):
+        """Create funnel-specific visualizations."""
+        funnel_chart_files = {}
+        
+        if not 'By Funnel' in aggregations or aggregations['By Funnel'].empty:
+            return funnel_chart_files
+            
+        funnel_df = aggregations['By Funnel']
+        
+        try:
+            # Create funnel violation bar chart
+            plt.figure(figsize=(12, 8))
+            funnel_names = funnel_df['funnel_name']
+            
+            # Use a consistent color scheme
+            colors = {
+                'critical': '#E63946',
+                'serious': '#F4A261',
+                'moderate': '#2A9D8F',
+                'minor': '#457B9D',
+            }
+            
+            # Create stacked bar chart
+            plt.barh(funnel_names, funnel_df['Minor_Violations'], 
+                    height=0.6, color=colors['minor'], label='Minor')
+            plt.barh(funnel_names, funnel_df['Moderate_Violations'], 
+                    height=0.6, left=funnel_df['Minor_Violations'], 
+                    color=colors['moderate'], label='Moderate')
+            plt.barh(funnel_names, funnel_df['Serious_Violations'], 
+                    height=0.6, 
+                    left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'], 
+                    color=colors['serious'], label='Serious')
+            plt.barh(funnel_names, funnel_df['Critical_Violations'], 
+                    height=0.6, 
+                    left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'] + 
+                        funnel_df['Serious_Violations'], 
+                    color=colors['critical'], label='Critical')
+            
+            plt.xlabel('Number of Violations')
+            plt.title('Accessibility Issues by Funnel', fontsize=16)
+            plt.legend(loc='upper right')
+            plt.grid(axis='x', linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            
+            chart_path = Path(chart_dir) / 'chart_funnel_violations.png'
+            plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            funnel_chart_files['funnel_violations'] = str(chart_path)
+            
+            # If there are funnel steps, create a heatmap
+            if 'By Funnel Step' in aggregations and not aggregations['By Funnel Step'].empty:
+                step_df = aggregations['By Funnel Step']
+                
+                if len(step_df) > 1:
+                    plt.figure(figsize=(12, 10))
+                    
+                    # Create pivot table for the heatmap
+                    pivot_df = step_df.pivot_table(
+                        index='funnel_name',
+                        columns='funnel_step',
+                        values='Total_Violations',
+                        aggfunc='sum',
+                        fill_value=0
+                    )
+                    
+                    # Create heatmap
+                    sns.heatmap(pivot_df, annot=True, cmap='YlOrRd', fmt='g',
+                            linewidths=0.5, linecolor='black')
+                    
+                    plt.title('Violations by Funnel Step', fontsize=16)
+                    plt.ylabel('Funnel')
+                    plt.xlabel('Step')
+                    plt.tight_layout()
+                    
+                    chart_path = Path(chart_dir) / 'chart_funnel_steps_heatmap.png'
+                    plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    funnel_chart_files['funnel_steps_heatmap'] = str(chart_path)
+            
+            return funnel_chart_files
+            
+        except Exception as e:
+            self.logger.error(f"Error creating funnel charts: {e}")
+            return funnel_chart_files
+    
     def create_charts(self, metrics: Dict, aggregations: Dict[str, pd.DataFrame], 
                      data_df: pd.DataFrame) -> Dict[str, str]:
         """
@@ -1410,139 +1544,12 @@ class AccessibilityAnalyzer:
                 self.logger.error(f"Error creating template analysis chart: {e}")
                 
         # Funnel-specific visualizations
+        funnel_chart_files = {}
         if 'By Funnel' in aggregations and not aggregations['By Funnel'].empty:
-            try:
-                # Prepare data
-                funnel_df = aggregations['By Funnel'].copy()
-                
-                # 1. Funnel violations bar chart
-                plt.figure(figsize=(12, max(6, len(funnel_df) * 0.8)))
-                
-                # Stacked bar chart showing different impact levels
-                bar_positions = range(len(funnel_df))
-                bar_height = 0.6
-                
-                plt.barh(bar_positions, funnel_df['Minor_Violations'], 
-                        height=bar_height, color=colors['minor'], label='Minor')
-                plt.barh(bar_positions, funnel_df['Moderate_Violations'], 
-                        height=bar_height, left=funnel_df['Minor_Violations'], 
-                        color=colors['moderate'], label='Moderate')
-                plt.barh(bar_positions, funnel_df['Serious_Violations'], 
-                        height=bar_height, 
-                        left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'], 
-                        color=colors['serious'], label='Serious')
-                plt.barh(bar_positions, funnel_df['Critical_Violations'], 
-                        height=bar_height, 
-                        left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'] + funnel_df['Serious_Violations'], 
-                        color=colors['critical'], label='Critical')
-                
-                # Add total count labels
-                for i, (total, score) in enumerate(zip(funnel_df['Total_Violations'], funnel_df['Priority_Score'])):
-                    plt.text(total + 0.5, i, f"{total} (Score: {score:.1f})", 
-                            va='center', fontsize=9, fontweight='bold')
-                
-                plt.yticks(bar_positions, funnel_df['funnel_name'])
-                plt.xlabel('Number of Violations')
-                plt.title('Accessibility Issues by Funnel', fontsize=16)
-                plt.legend(loc='upper right')
-                plt.grid(axis='x', linestyle='--', alpha=0.7)
-                plt.tight_layout()
-                
-                chart_path = charts_dir / 'chart_funnel_violations.png'
-                plt.savefig(chart_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                chart_files['funnel_violations'] = str(chart_path)
-                
-                # 2. Funnel radar chart
-                # Only create if we have multiple funnels
-                if len(funnel_df) > 1:
-                    plt.figure(figsize=(10, 10))
-                    
-                    # Prepare normalized data for radar chart (all on same scale)
-                    # Use only top 3 funnels to avoid overcrowding
-                    top_funnels = funnel_df.head(3)
-                    
-                    # Categories for radar
-                    categories = ['Critical', 'Serious', 'Moderate', 'Minor', 'Avg Per Page']
-                    
-                    # Number of categories
-                    N = len(categories)
-                    
-                    # Create angle for each category
-                    angles = [n / float(N) * 2 * np.pi for n in range(N)]
-                    angles += angles[:1]  # Close the loop
-                    
-                    # Initialize the radar plot
-                    ax = plt.subplot(111, polar=True)
-                    
-                    # Draw one axis per variable and add labels
-                    plt.xticks(angles[:-1], categories, size=10)
-                    
-                    # Draw y-axis labels
-                    ax.set_rlabel_position(0)
-                    plt.yticks([0.25, 0.5, 0.75, 1], ["0.25", "0.5", "0.75", "1"], 
-                              color="grey", size=8)
-                    plt.ylim(0, 1)
-                    
-                    # Plot each funnel
-                    for i, (idx, row) in enumerate(top_funnels.iterrows()):
-                        # Get data for this funnel
-                        values = [
-                            row['Critical_Violations'] / (funnel_df['Critical_Violations'].max() or 1),
-                            row['Serious_Violations'] / (funnel_df['Serious_Violations'].max() or 1),
-                            row['Moderate_Violations'] / (funnel_df['Moderate_Violations'].max() or 1),
-                            row['Minor_Violations'] / (funnel_df['Minor_Violations'].max() or 1),
-                            row['Avg_Per_Page'] / (funnel_df['Avg_Per_Page'].max() or 1)
-                        ]
-                        values += values[:1]  # Close the loop
-                        
-                        # Plot this funnel
-                        ax.plot(angles, values, linewidth=2, linestyle='solid', 
-                               label=row['funnel_name'])
-                        ax.fill(angles, values, alpha=0.1)
-                    
-                    # Add legend
-                    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
-                    plt.title('Funnel Comparison (Normalized)', size=16)
-                    
-                    chart_path = charts_dir / 'chart_funnel_radar.png'
-                    plt.savefig(chart_path, dpi=300, bbox_inches='tight')
-                    plt.close()
-                    chart_files['funnel_radar'] = str(chart_path)
-                
-                # 3. Funnel steps heatmap
-                if 'By Funnel Step' in aggregations and not aggregations['By Funnel Step'].empty:
-                    step_df = aggregations['By Funnel Step'].copy()
-                    
-                    # Pivot data for heatmap
-                    if len(step_df) > 1:
-                        plt.figure(figsize=(12, 10))
-                        
-                        # Create pivot table: funnel_name vs funnel_step with total violations as values
-                        pivot_df = step_df.pivot_table(
-                            index='funnel_name',
-                            columns='funnel_step',
-                            values='Total_Violations',
-                            aggfunc='sum',
-                            fill_value=0
-                        )
-                        
-                        # Create heatmap
-                        sns.heatmap(pivot_df, annot=True, cmap='YlOrRd', fmt='g',
-                                   linewidths=0.5, linecolor='black')
-                        
-                        plt.title('Violations by Funnel Step', fontsize=16)
-                        plt.ylabel('Funnel')
-                        plt.xlabel('Step')
-                        plt.tight_layout()
-                        
-                        chart_path = charts_dir / 'chart_funnel_steps_heatmap.png'
-                        plt.savefig(chart_path, dpi=300, bbox_inches='tight')
-                        plt.close()
-                        chart_files['funnel_steps_heatmap'] = str(chart_path)
-            except Exception as e:
-                self.logger.error(f"Error creating funnel visualizations: {e}")
-                
+            funnel_chart_files = self.create_funnel_charts(metrics, aggregations, charts_dir)
+            chart_files.update(funnel_chart_files)
+
+       
         return chart_files
     
     def load_template_data(self, pickle_file: str) -> Tuple[pd.DataFrame, Dict]:
@@ -2310,112 +2317,23 @@ class AccessibilityAnalyzer:
                 funnel_ws.write(row, 2, description, cell_format)
                 row += 1
             
+            # Insert funnel charts if available
             row += 2
+            chart_row = row
             
-            # Funnel comparison section
-            funnel_ws.merge_range(f'A{row}:G{row}', 'Funnel Comparison', subtitle_format)
-            row += 1
-            
-            funnel_df = aggregations['By Funnel']
-            
-            # Write funnel comparison header
-            columns = ['Funnel Name', 'Pages', 'Total Violations', 'Critical', 'Serious', 'Avg Per Page', 'Priority Score']
-            for i, col in enumerate(columns):
-                funnel_ws.write(row, i, col, header_format)
-            row += 1
-            
-            # Write funnel comparison data
-            for _, funnel_row in funnel_df.iterrows():
-                funnel_ws.write(row, 0, funnel_row['funnel_name'], cell_format)
-                funnel_ws.write(row, 1, funnel_row['Pages'], num_format)
-                funnel_ws.write(row, 2, funnel_row['Total_Violations'], num_format)
+            if 'funnel_violations' in chart_files:
+                funnel_ws.merge_range(f'A{chart_row}:G{chart_row}', 'Funnel Visualizations', subtitle_format)
+                chart_row += 1
                 
-                # Critical violations with conditional formatting
-                if funnel_row['Critical_Violations'] > 0:
-                    funnel_ws.write(row, 3, funnel_row['Critical_Violations'], critical_format)
-                else:
-                    funnel_ws.write(row, 3, funnel_row['Critical_Violations'], num_format)
-                    
-                funnel_ws.write(row, 4, funnel_row['Serious_Violations'], num_format)
-                funnel_ws.write(row, 5, funnel_row['Avg_Per_Page'], num_format)
-                
-                # Priority score with conditional formatting
-                score = funnel_row['Priority_Score']
-                if score > 10:
-                    score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFCCCB', 'border': 1})
-                elif score > 5:
-                    score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFDEAD', 'border': 1})
-                else:
-                    score_format = num_format
-                    
-                funnel_ws.write(row, 6, score, score_format)
-                row += 1
-            
-            row += 2
-            
-            # Add funnel step analysis if available
-            if 'By Funnel Step' in aggregations and not aggregations['By Funnel Step'].empty:
-                funnel_ws.merge_range(f'A{row}:G{row}', 'Funnel Step Analysis', subtitle_format)
-                row += 1
-                
-                step_df = aggregations['By Funnel Step']
-                
-                # Write step analysis header
-                step_columns = ['Funnel', 'Step', 'Violations', 'Critical', 'Serious', 'Moderate', 'Priority Score']
-                for i, col in enumerate(step_columns):
-                    funnel_ws.write(row, i, col, header_format)
-                row += 1
-                
-                # Limit to top 15 most problematic steps
-                top_steps = step_df.head(15)
-                
-                # Write step analysis data
-                for idx, step_row in top_steps.iterrows():
-                    funnel_ws.write(row, 0, step_row['funnel_name'], cell_format)
-                    funnel_ws.write(row, 1, step_row['funnel_step'], cell_format)
-                    funnel_ws.write(row, 2, step_row['Total_Violations'], num_format)
-                    
-                    # Critical violations with conditional formatting
-                    if step_row['Critical_Violations'] > 0:
-                        funnel_ws.write(row, 3, step_row['Critical_Violations'], critical_format)
-                    else:
-                        funnel_ws.write(row, 3, step_row['Critical_Violations'], num_format)
-                        
-                    funnel_ws.write(row, 4, step_row['Serious_Violations'], num_format)
-                    funnel_ws.write(row, 5, step_row['Moderate_Violations'], num_format)
-                    
-                    # Priority score with conditional formatting
-                    score = step_row['Priority_Score']
-                    if score > 8:
-                        score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFCCCB', 'border': 1})
-                    elif score > 4:
-                        score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFDEAD', 'border': 1})
-                    else:
-                        score_format = num_format
-                        
-                    funnel_ws.write(row, 6, score, score_format)
-                    row += 1
-            
-        # Insert funnel charts if available
-        row += 2
-        chart_row = row
-        
-        if 'funnel_violations' in chart_files:
-            funnel_ws.merge_range(f'A{chart_row}:G{chart_row}', 'Funnel Visualizations', subtitle_format)
-            chart_row += 1
-            
-            funnel_ws.insert_image(chart_row, 0, chart_files['funnel_violations'], {'x_scale': 0.6, 'y_scale': 0.6})
-            chart_row += 20
-            
-            if 'funnel_radar' in chart_files:
-                funnel_ws.insert_image(chart_row, 0, chart_files['funnel_radar'], {'x_scale': 0.6, 'y_scale': 0.6})
+                funnel_ws.insert_image(chart_row, 0, chart_files['funnel_violations'], {'x_scale': 0.6, 'y_scale': 0.6})
                 chart_row += 20
+                    
+                if 'funnel_steps_heatmap' in chart_files:
+                    funnel_ws.insert_image(chart_row, 0, chart_files['funnel_steps_heatmap'], {'x_scale': 0.6, 'y_scale': 0.6})
+
+            
+                self.logger.info(f"Report generated successfully: {output_excel}")
                 
-            if 'funnel_steps_heatmap' in chart_files:
-                funnel_ws.insert_image(chart_row, 0, chart_files['funnel_steps_heatmap'], {'x_scale': 0.6, 'y_scale': 0.6})
-        
-        self.logger.info(f"Report generated successfully: {output_excel}")
-        
         return output_excel
 
     def run_analysis(self, input_excel: Optional[str] = None, crawler_state: Optional[str] = None) -> str:
