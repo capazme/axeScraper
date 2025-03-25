@@ -163,6 +163,75 @@ class AccessibilityAnalyzer:
         self._normalized_url_cache = {}
         self._wcag_mapping_cache = {}
         
+        # Add funnel configuration with enhanced metadata
+        self.funnel_categories = {
+            'checkout': {
+                'steps': ['cart', 'checkout', 'payment', 'confirmation'],
+                'critical_steps': ['payment', 'confirmation'],
+                'description': 'Purchase completion flow',
+                'severity_multiplier': 2.0
+            },
+            'registration': {
+                'steps': ['register', 'verification', 'profile'],
+                'critical_steps': ['verification'],
+                'description': 'New user registration flow',
+                'severity_multiplier': 1.5
+            },
+            'login': {
+                'steps': ['login', 'account', 'dashboard'],
+                'critical_steps': ['login'],
+                'description': 'User authentication flow',
+                'severity_multiplier': 1.5
+            },
+            'search': {
+                'steps': ['search', 'results', 'filters', 'product'],
+                'critical_steps': ['results', 'product'],
+                'description': 'Product search and discovery flow',
+                'severity_multiplier': 1.2
+            }
+        }
+        
+        # Add funnel metadata storage
+        self.funnel_metadata = {
+            'funnel_step_patterns': {
+                'cart': [r'/cart', r'/basket', r'/bag'],
+                'checkout': [r'/checkout', r'/order'],
+                'payment': [r'/payment', r'/pay', r'/billing'],
+                'confirmation': [r'/confirm', r'/success', r'/thank-you'],
+                'register': [r'/register', r'/sign-up', r'/create-account'],
+                'verification': [r'/verify', r'/confirmation', r'/activate'],
+                'profile': [r'/profile', r'/account/setup', r'/preferences'],
+                'login': [r'/login', r'/sign-in', r'/auth'],
+                'account': [r'/account', r'/profile', r'/my-account'],
+                'dashboard': [r'/dashboard', r'/overview', r'/home'],
+                'search': [r'/search', r'/find', r'/cerca'],
+                'results': [r'/results', r'/search-results', r'/products'],
+                'filters': [r'/filter', r'/refine', r'/sort'],
+                'product': [r'/product', r'/item', r'/detail']
+            },
+            'funnel_metrics': {
+                'completion_thresholds': {
+                    'checkout': 0.8,
+                    'registration': 0.7,
+                    'login': 0.9,
+                    'search': 0.6
+                },
+                'abandonment_indicators': {
+                    'critical_violations_threshold': 3,
+                    'serious_violations_threshold': 5,
+                    'total_violations_threshold': 10
+                }
+            },
+            'funnel_weights': {
+                'step_order': 1.2,  # Multiplier for violations in order-dependent steps
+                'critical_step': 1.5,  # Additional multiplier for critical steps
+                'mobile_context': 1.3  # Multiplier for mobile-specific issues
+            }
+        }
+        
+        # Initialize funnel analysis cache
+        self._funnel_analysis_cache = {}
+        
         # Add funnel configuration
         self.funnel_categories = {
             'checkout': ['cart', 'checkout', 'payment', 'confirmation'],
@@ -260,6 +329,8 @@ class AccessibilityAnalyzer:
         """
         clean_df = df.copy()
         original_count = len(clean_df)
+        
+        # Basic cleaning - keep the same as existing
         clean_df = clean_df.dropna(subset=['violation_id', 'impact', 'page_url'])
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             normalized_urls = list(executor.map(self.normalize_url, clean_df['page_url']))
@@ -267,6 +338,8 @@ class AccessibilityAnalyzer:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             page_types = list(executor.map(self.get_page_type, clean_df['normalized_url']))
         clean_df['page_type'] = page_types
+        
+        # Impact and severity processing - keep the same as existing
         clean_df['impact'] = clean_df['impact'].str.lower().str.strip()
         valid_impacts = list(self.impact_weights.keys())
         clean_df.loc[~clean_df['impact'].isin(valid_impacts), 'impact'] = 'unknown'
@@ -277,9 +350,10 @@ class AccessibilityAnalyzer:
         clean_df['wcag_name'] = clean_df['violation_id'].apply(self._get_wcag_name)
         clean_df['severity_score'] = clean_df['impact'].map(self.impact_weights)
         
-        # Add funnel identification if present
+        # Add funnel identification if present or create default columns
         if 'funnel_name' in clean_df.columns:
-            # Keep existing funnel data
+            # Keep existing funnel data and ensure values are not NaN
+            clean_df['funnel_name'] = clean_df['funnel_name'].fillna('none')
             clean_df['has_funnel_data'] = clean_df['funnel_name'] != 'none'
         else:
             # Add funnel column with default 'none'
@@ -288,18 +362,43 @@ class AccessibilityAnalyzer:
             
         if 'funnel_step' not in clean_df.columns:
             clean_df['funnel_step'] = 'none'
+        else:
+            clean_df['funnel_step'] = clean_df['funnel_step'].fillna('none')
             
-        # Calculate funnel-specific metrics
-        if clean_df['has_funnel_data'].any():
-            clean_df['funnel_severity_score'] = clean_df.apply(
-                lambda row: self.impact_weights.get(row['impact'], 0) * 1.5 
-                if row['has_funnel_data'] else self.impact_weights.get(row['impact'], 0),
-                axis=1
-            )
+        # Apply funnel metadata if available
+        if hasattr(self, 'funnel_metadata') and self.funnel_metadata:
+            # For each URL in the funnel metadata, update the corresponding rows
+            for url, metadata in self.funnel_metadata.items():
+                # Find rows that match this URL
+                mask = clean_df['page_url'].apply(lambda x: str(x) == url or url in str(x))
+                
+                if mask.any():
+                    clean_df.loc[mask, 'funnel_name'] = metadata.get('funnel_name', 'unknown')
+                    clean_df.loc[mask, 'funnel_step'] = metadata.get('funnel_step', 'unknown')
+                    clean_df.loc[mask, 'has_funnel_data'] = True
+        
+        # Calculate funnel-specific metrics for all rows
+        clean_df['funnel_severity_score'] = clean_df.apply(
+            lambda row: self.impact_weights.get(row['impact'], 0) * 1.5 
+            if row['has_funnel_data'] else self.impact_weights.get(row['impact'], 0),
+            axis=1
+        )
         
         self.logger.info(f"Original rows: {original_count}, remaining: {len(clean_df)}")
-        return clean_df
         
+        # Log funnel data statistics if present
+        if clean_df['has_funnel_data'].any():
+            funnel_violations = len(clean_df[clean_df['has_funnel_data']])
+            funnel_pct = (funnel_violations / len(clean_df)) * 100 if len(clean_df) > 0 else 0
+            self.logger.info(f"Found {funnel_violations} funnel-related violations ({funnel_pct:.1f}% of total)")
+            
+            # Log distribution by funnel
+            funnel_counts = clean_df[clean_df['has_funnel_data']].groupby('funnel_name').size()
+            for funnel_name, count in funnel_counts.items():
+                self.logger.info(f"  - Funnel '{funnel_name}': {count} violations")
+        
+        return clean_df
+    
     def _get_wcag_category(self, violation_id: str) -> str:
         """Get WCAG category for a violation ID."""
         key = next((k for k in self.wcag_categories if k in violation_id.lower()), None)
@@ -408,7 +507,7 @@ class AccessibilityAnalyzer:
             return df
     def calculate_metrics(self, df: pd.DataFrame) -> Dict:
         """
-        Calculate basic accessibility metrics.
+        Calculate basic accessibility metrics including funnel analysis.
         
         Args:
             df: DataFrame with accessibility data
@@ -420,13 +519,20 @@ class AccessibilityAnalyzer:
             self.logger.warning("Empty DataFrame, cannot calculate metrics")
             return self._empty_metrics()
         
+        # Basic metrics calculation
         metrics = {}
         metrics['Total Violations'] = len(df)
         metrics['Unique Pages'] = df['normalized_url'].nunique()
         metrics['Unique Violation Types'] = df['violation_id'].nunique()
+        
+        # Impact distribution
         impact_counts = df['impact'].value_counts().to_dict()
-        for impact, count in sorted(impact_counts.items(), key=lambda x: self.impact_weights.get(x[0], 0), reverse=True):
+        for impact, count in sorted(impact_counts.items(), 
+                                  key=lambda x: self.impact_weights.get(x[0], 0), 
+                                  reverse=True):
             metrics[f'{impact.capitalize()} Violations'] = count
+            
+        # Per-page metrics
         unique_pages = metrics['Unique Pages']
         avg_per_page = metrics['Total Violations'] / unique_pages if unique_pages > 0 else 0
         metrics['Average Violations per Page'] = round(avg_per_page, 2)
@@ -435,6 +541,156 @@ class AccessibilityAnalyzer:
         pages_with_critical = df[df['impact'] == 'critical']['normalized_url'].nunique()
         critical_page_pct = (pages_with_critical / unique_pages * 100) if unique_pages > 0 else 0
         metrics['Pages with Critical Issues (%)'] = round(critical_page_pct, 2)
+        
+        # Page type metrics - keep existing code
+        metrics['Page Type Analysis'] = self._calculate_page_type_metrics(df)
+        
+        # WCAG metrics - keep existing code
+        metrics.update(self._calculate_wcag_metrics(df))
+        
+        # Conformance metrics - keep existing code
+        metrics.update(self._calculate_conformance_metrics(
+            df, impact_counts, unique_pages, pages_with_critical))
+        
+        # Add funnel analysis metrics if funnel data exists
+        funnel_df = df[df['funnel_name'] != 'none']
+        if not funnel_df.empty:
+            # Basic funnel metrics
+            metrics['Funnel Analysis'] = {
+                'Total Funnels': funnel_df['funnel_name'].nunique(),
+                'Total Funnel Pages': funnel_df['normalized_url'].nunique(),
+                'Total Funnel Violations': len(funnel_df),
+                'Average Violations per Funnel Page': round(len(funnel_df) / funnel_df['normalized_url'].nunique(), 2) 
+                    if funnel_df['normalized_url'].nunique() > 0 else 0
+            }
+            
+            # Funnel impact distribution
+            funnel_impact_counts = funnel_df['impact'].value_counts().to_dict()
+            for impact, count in sorted(funnel_impact_counts.items(), 
+                                       key=lambda x: self.impact_weights.get(x[0], 0), 
+                                       reverse=True):
+                metrics['Funnel Analysis'][f'{impact.capitalize()} Violations'] = count
+                
+            # Calculate most problematic funnel
+            funnel_metrics = {}
+            for funnel_name, funnel_group in funnel_df.groupby('funnel_name'):
+                funnel_pages = funnel_group['normalized_url'].nunique()
+                critical_pages = funnel_group[funnel_group['impact'] == 'critical']['normalized_url'].nunique()
+                critical_pct = (critical_pages / funnel_pages * 100) if funnel_pages > 0 else 0
+                
+                funnel_metrics[funnel_name] = {
+                    'Pages': funnel_pages,
+                    'Total Violations': len(funnel_group),
+                    'Avg Violations per Page': round(len(funnel_group) / funnel_pages, 2) if funnel_pages > 0 else 0,
+                    'Critical Violations': funnel_group[funnel_group['impact'] == 'critical'].shape[0],
+                    'Critical Pages': critical_pages,
+                    'Critical Pages (%)': round(critical_pct, 2),
+                    'Weighted Score': round(funnel_group['funnel_severity_score'].sum() / funnel_pages, 2) 
+                        if funnel_pages > 0 else 0
+                }
+            
+            # Sort funnels by weighted score (descending)
+            sorted_funnels = sorted(funnel_metrics.items(), 
+                                   key=lambda x: x[1]['Weighted Score'], 
+                                   reverse=True)
+            
+            if sorted_funnels:
+                most_problematic = sorted_funnels[0][0]
+                metrics['Funnel Analysis']['Most Problematic Funnel'] = most_problematic
+                metrics['Funnel Analysis']['Funnel Details'] = funnel_metrics
+            
+            # Step analysis - find steps with most issues
+            step_metrics = {}
+            for (funnel_name, step_name), step_group in funnel_df.groupby(['funnel_name', 'funnel_step']):
+                step_key = f"{funnel_name}: {step_name}"
+                step_metrics[step_key] = {
+                    'Violations': len(step_group),
+                    'Critical': step_group[step_group['impact'] == 'critical'].shape[0],
+                    'Serious': step_group[step_group['impact'] == 'serious'].shape[0]
+                }
+            
+            # Sort steps by critical violations (descending)
+            sorted_steps = sorted(step_metrics.items(),
+                                 key=lambda x: (x[1]['Critical'], x[1]['Serious']),
+                                 reverse=True)
+            
+            if sorted_steps:
+                # Add top problematic steps
+                top_steps = {name: metrics for name, metrics in sorted_steps[:5]}
+                metrics['Funnel Analysis']['Most Problematic Steps'] = top_steps
+        
+        return metrics
+    
+    def _calculate_funnel_metrics(self, funnel_df: pd.DataFrame) -> Dict:
+        """Calculate detailed funnel metrics."""
+        funnel_metrics = {
+            'Total Funnels': funnel_df['funnel_name'].nunique(),
+            'Total Funnel Pages': funnel_df['normalized_url'].nunique(),
+            'Total Funnel Violations': len(funnel_df)
+        }
+        
+        # Add average violations per funnel page
+        if funnel_df['normalized_url'].nunique() > 0:
+            funnel_metrics['Average Violations per Funnel Page'] = round(
+                len(funnel_df) / funnel_df['normalized_url'].nunique(), 2)
+        
+        # Funnel impact distribution
+        funnel_impact_counts = funnel_df['impact'].value_counts().to_dict()
+        for impact, count in sorted(funnel_impact_counts.items(), 
+                                  key=lambda x: self.impact_weights.get(x[0], 0), 
+                                  reverse=True):
+            funnel_metrics[f'{impact.capitalize()} Violations'] = count
+        
+        # Per-funnel analysis
+        funnel_details = {}
+        for funnel_name, funnel_group in funnel_df.groupby('funnel_name'):
+            funnel_pages = funnel_group['normalized_url'].nunique()
+            critical_pages = funnel_group[funnel_group['impact'] == 'critical']['normalized_url'].nunique()
+            critical_pct = (critical_pages / funnel_pages * 100) if funnel_pages > 0 else 0
+            
+            funnel_details[funnel_name] = {
+                'Pages': funnel_pages,
+                'Total Violations': len(funnel_group),
+                'Avg Violations per Page': round(len(funnel_group) / funnel_pages, 2) if funnel_pages > 0 else 0,
+                'Critical Violations': funnel_group[funnel_group['impact'] == 'critical'].shape[0],
+                'Critical Pages': critical_pages,
+                'Critical Pages (%)': round(critical_pct, 2),
+                'Weighted Score': round(funnel_group['funnel_severity_score'].sum() / funnel_pages, 2) 
+                    if funnel_pages > 0 else 0
+            }
+        
+        # Identify most problematic funnel
+        if funnel_details:
+            sorted_funnels = sorted(funnel_details.items(), 
+                                  key=lambda x: x[1]['Weighted Score'], 
+                                  reverse=True)
+            funnel_metrics['Most Problematic Funnel'] = sorted_funnels[0][0]
+            funnel_metrics['Funnel Details'] = funnel_details
+        
+        # Step analysis
+        step_metrics = {}
+        for (funnel_name, step_name), step_group in funnel_df.groupby(['funnel_name', 'funnel_step']):
+            step_key = f"{funnel_name}: {step_name}"
+            step_metrics[step_key] = {
+                'Violations': len(step_group),
+                'Critical': step_group[step_group['impact'] == 'critical'].shape[0],
+                'Serious': step_group[step_group['impact'] == 'serious'].shape[0],
+                'Weighted Score': round(step_group['funnel_severity_score'].sum(), 2)
+            }
+        
+        # Add top problematic steps
+        if step_metrics:
+            sorted_steps = sorted(
+                step_metrics.items(),
+                key=lambda x: (x[1]['Critical'], x[1]['Serious'], x[1]['Weighted Score']),
+                reverse=True
+            )
+            funnel_metrics['Most Problematic Steps'] = dict(sorted_steps[:5])
+        
+        return funnel_metrics
+        
+    def _calculate_page_type_metrics(self, df: pd.DataFrame) -> Dict:
+        """Calculate metrics grouped by page type."""
         page_type_metrics = {}
         for page_type, group in df.groupby('page_type'):
             type_pages = group['normalized_url'].nunique()
@@ -445,7 +701,11 @@ class AccessibilityAnalyzer:
                 'critical': group[group['impact'] == 'critical']['normalized_url'].nunique(),
                 'critical_pct': round((group[group['impact'] == 'critical']['normalized_url'].nunique() / type_pages) * 100, 2) if type_pages > 0 else 0
             }
-        metrics['Page Type Analysis'] = page_type_metrics
+        return page_type_metrics
+    
+    def _calculate_wcag_metrics(self, df: pd.DataFrame) -> Dict:
+        """Calculate WCAG-related metrics."""
+        wcag_metrics = {}
         wcag_criteria = df.groupby(['wcag_category', 'wcag_criterion', 'wcag_name']).size().reset_index(name='count')
         wcag_criteria = wcag_criteria.sort_values('count', ascending=False)
         top_wcag = {}
@@ -454,9 +714,15 @@ class AccessibilityAnalyzer:
             top_wcag[criterion_key] = {
                 'name': row['wcag_name'],
                 'count': row['count'],
-                'percentage': round((row['count'] / metrics['Total Violations']) * 100, 2)
+                'percentage': round((row['count'] / len(df)) * 100, 2)
             }
-        metrics['Top WCAG Issues'] = top_wcag
+        wcag_metrics['Top WCAG Issues'] = top_wcag
+        return wcag_metrics
+    
+    def _calculate_conformance_metrics(self, df: pd.DataFrame, impact_counts: Dict, 
+                                     unique_pages: int, pages_with_critical: int) -> Dict:
+        """Calculate WCAG conformance metrics."""
+        metrics = {}
         critical_factor = (pages_with_critical / unique_pages) if unique_pages > 0 else 0
         weighted_violation_score = (
             (impact_counts.get('critical', 0) * 4) + 
@@ -465,8 +731,10 @@ class AccessibilityAnalyzer:
             (impact_counts.get('minor', 0) * 1)
         ) / max(unique_pages, 1)
         critical_penalty = critical_factor * 20
+        
         conformance_score = max(0, 100 - min(100, (weighted_violation_score * 2 + critical_penalty)))
         metrics['WCAG Conformance Score'] = round(conformance_score, 1)
+        
         if conformance_score >= 95:
             conformance_level = 'AA (Nearly conformant)'
         elif conformance_score >= 85:
@@ -478,48 +746,8 @@ class AccessibilityAnalyzer:
         else:
             conformance_level = 'Non-conformant (Major issues)'
         metrics['WCAG Conformance Level'] = conformance_level
-        self.logger.info(f"Calculated advanced metrics for {metrics['Total Violations']} violations across {metrics['Unique Pages']} pages")
         
-        # Add funnel metrics if funnel data exists
-        if 'funnel_name' in df.columns and not df['funnel_name'].eq('none').all():
-            funnel_data = df[df['funnel_name'] != 'none']
-            
-            metrics['Funnel Analysis'] = {
-                'Total Funnels': funnel_data['funnel_name'].nunique(),
-                'Total Funnel Pages': funnel_data['normalized_url'].nunique(),
-                'Total Funnel Violations': len(funnel_data),
-            }
-            
-            # Calculate most problematic funnel
-            most_critical_funnel = (
-                funnel_data.groupby('funnel_name')
-                .apply(lambda x: (x['impact'] == 'critical').sum() / x['normalized_url'].nunique())
-                .sort_values(ascending=False)
-            )
-            
-            if not most_critical_funnel.empty:
-                metrics['Funnel Analysis']['Most Problematic Journey'] = most_critical_funnel.index[0]
-                
         return metrics
-    
-    def _empty_metrics(self) -> Dict:
-        """Return default empty metrics when no data is available."""
-        return {
-            'Total Violations': 0,
-            'Unique Pages': 0,
-            'Unique Violation Types': 0,
-            'Average Violations per Page': 0,
-            'Critical Violations': 0,
-            'Serious Violations': 0,
-            'Moderate Violations': 0,
-            'Minor Violations': 0,
-            'Weighted Severity Score': 0,
-            'Pages with Critical Issues (%)': 0,
-            'Page Type Analysis': {},
-            'WCAG Conformance Level': 'Unknown',
-            'WCAG Conformance Score': 0,
-            'Top WCAG Issues': {}
-        }
     
     def create_aggregations(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
@@ -546,76 +774,12 @@ class AccessibilityAnalyzer:
                               Avg_Per_Page=('violation_id', lambda x: len(x) / df['normalized_url'].nunique() if df['normalized_url'].nunique() > 0 else 0))
                          .reset_index())
             total = agg_impact['Total_Violations'].sum()
-            agg_impact['Percentage'] = (agg_impact['Total_Violations'] / total * 100).round(2) if total > 0 else 0
-            agg_impact['Priority_Index'] = agg_impact['impact'].map(self.impact_weights) * agg_impact['Unique_Pages']
-            impact_order = {impact: i for i, impact in enumerate(self.impact_weights.keys())}
-            agg_impact['impact_order'] = agg_impact['impact'].map(lambda x: impact_order.get(x, 999))
-            agg_impact = agg_impact.sort_values('impact_order').drop('impact_order', axis=1)
-            numeric_cols = ['Avg_Per_Page', 'Percentage', 'Priority_Index']
-            agg_impact[numeric_cols] = agg_impact[numeric_cols].round(2)
-            aggregations['By Impact'] = agg_impact
-        except Exception as e:
-            self.logger.error(f"Error creating impact aggregation: {e}")
-            aggregations['By Impact'] = pd.DataFrame()
-        
-        # Aggregation by page
-        try:
-            agg_page = df.groupby('normalized_url', as_index=False).agg(
-                Total_Violations=pd.NamedAgg(column='violation_id', aggfunc='count'),
-                Original_URL=pd.NamedAgg(column='page_url', aggfunc='first'),
-                Page_Type=pd.NamedAgg(column='page_type', aggfunc='first'),
-                Critical_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'critical')),
-                Serious_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'serious')),
-                Moderate_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'moderate')),
-                Minor_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'minor')),
-                Unique_Violations=pd.NamedAgg(column='violation_id', aggfunc='nunique'),
-                WCAG_Categories=pd.NamedAgg(column='wcag_category', aggfunc=lambda x: len(set(x)))
-            )
-            if 'page_depth' in df.columns:
-                depth_data = df.groupby('normalized_url')['page_depth'].first()
-                agg_page['Page_Depth'] = agg_page['normalized_url'].map(depth_data)
-            if 'template' in df.columns:
-                template_data = df.groupby('normalized_url')['template'].first()
-                agg_page['Template'] = agg_page['normalized_url'].map(template_data)
-            agg_page['Priority_Score'] = (
-                agg_page['Critical_Violations'] * 4 + 
-                agg_page['Serious_Violations'] * 3 + 
-                agg_page['Moderate_Violations'] * 2 +
-                agg_page['Minor_Violations'] * 1
-            )
-            max_score = agg_page['Priority_Score'].max()
-            if max_score > 0:
-                agg_page['Accessibility_Index'] = 100 - (agg_page['Priority_Score'] / max_score * 100)
-            else:
-                agg_page['Accessibility_Index'] = 100
-            top_pages = agg_page.sort_values('Priority_Score', ascending=False).head(15)
-            top_pages['Display_URL'] = top_pages['Original_URL'].apply(lambda x: str(x)[:50] + '...' if len(str(x)) > 50 else str(x))
-            top_pages['Accessibility_Index'] = top_pages['Accessibility_Index'].round(2)
-            self.logger.info(f"Page aggregation created with {len(top_pages)} rows")
-            if len(top_pages) > 0:
-                aggregations['By Page'] = top_pages
-            else:
-                self.logger.warning("No pages found in aggregation, adding placeholder")
-                placeholder = pd.DataFrame({
-                    'normalized_url': ['No issues found'],
-                    'Total_Violations': [0],
-                    'Original_URL': ['No URL'],
-                    'Page_Type': ['N/A'],
-                    'Critical_Violations': [0],
-                    'Serious_Violations': [0],
-                    'Moderate_Violations': [0],
-                    'Minor_Violations': [0],
-                    'Unique_Violations': [0],
-                    'WCAG_Categories': [0],
-                    'Priority_Score': [0],
-                    'Accessibility_Index': [100],
-                    'Display_URL': ['No URL']
-                })
-                aggregations['By Page'] = placeholder
-        except Exception as e:
             self.logger.error(f"Error creating page aggregation: {e}")
             aggregations['By Page'] = pd.DataFrame()
-        
+        except Exception as e:
+            self.logger.error(f"Error creating aggregation by impact: {e}")
+            aggregations['By Impact'] = pd.DataFrame()
+            
         # Aggregation by violation type
         try:
             agg_violation = (df.groupby('violation_id')
@@ -764,6 +928,75 @@ class AccessibilityAnalyzer:
             except Exception as e:
                 self.logger.error(f"Error creating section aggregation: {e}")
                 aggregations['By Section'] = pd.DataFrame()
+        
+        # Add new Funnel Analysis aggregation if funnel data exists
+        if 'funnel_name' in df.columns and any(df['funnel_name'] != 'none'):
+            try:
+                # Filter to only funnel data
+                funnel_df = df[df['funnel_name'] != 'none']
+                
+                # Create aggregation by funnel
+                funnel_agg = funnel_df.groupby(['funnel_name'], as_index=False).agg(
+                    Total_Violations=pd.NamedAgg(column='violation_id', aggfunc='count'),
+                    Pages=pd.NamedAgg(column='normalized_url', aggfunc='nunique'),
+                    Critical_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'critical')),
+                    Serious_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'serious')),
+                    Moderate_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'moderate')),
+                    Minor_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'minor')),
+                    Unique_Violations=pd.NamedAgg(column='violation_id', aggfunc='nunique')
+                )
+                
+                # Calculate metrics
+                funnel_agg['Avg_Per_Page'] = (funnel_agg['Total_Violations'] / funnel_agg['Pages']).round(2)
+                funnel_agg['Priority_Score'] = (
+                    funnel_agg['Critical_Violations'] * 4 + 
+                    funnel_agg['Serious_Violations'] * 3 + 
+                    funnel_agg['Moderate_Violations'] * 2 +
+                    funnel_agg['Minor_Violations'] * 1
+                )
+                
+                # Get most common violations for each funnel
+                top_violations = {}
+                for funnel_name in funnel_agg['funnel_name']:
+                    funnel_subset = funnel_df[funnel_df['funnel_name'] == funnel_name]
+                    violation_counts = funnel_subset['violation_id'].value_counts()
+                    if not violation_counts.empty:
+                        top_violations[funnel_name] = violation_counts.index[0]
+                    else:
+                        top_violations[funnel_name] = 'None'
+                
+                funnel_agg['Top_Violation'] = funnel_agg['funnel_name'].map(top_violations)
+                
+                # Sort by priority score (descending)
+                funnel_agg = funnel_agg.sort_values('Priority_Score', ascending=False)
+                
+                aggregations['By Funnel'] = funnel_agg
+                
+                # Create step-level aggregation
+                step_agg = funnel_df.groupby(['funnel_name', 'funnel_step'], as_index=False).agg(
+                    Total_Violations=pd.NamedAgg(column='violation_id', aggfunc='count'),
+                    Critical_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'critical')),
+                    Serious_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'serious')),
+                    Moderate_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'moderate')),
+                    Minor_Violations=pd.NamedAgg(column='impact', aggfunc=lambda x: sum(x == 'minor')),
+                    Unique_Violations=pd.NamedAgg(column='violation_id', aggfunc='nunique')
+                )
+                
+                # Calculate priority score
+                step_agg['Priority_Score'] = (
+                    step_agg['Critical_Violations'] * 4 + 
+                    step_agg['Serious_Violations'] * 3 + 
+                    step_agg['Moderate_Violations'] * 2 +
+                    step_agg['Minor_Violations'] * 1
+                )
+                
+                # Sort by priority score (descending)
+                step_agg = step_agg.sort_values('Priority_Score', ascending=False)
+                
+                aggregations['By Funnel Step'] = step_agg
+                
+            except Exception as e:
+                self.logger.error(f"Error creating funnel aggregations: {e}")
         
         return aggregations
 
@@ -1161,6 +1394,140 @@ class AccessibilityAnalyzer:
                     chart_files['template_analysis'] = str(chart_path)
             except Exception as e:
                 self.logger.error(f"Error creating template analysis chart: {e}")
+                
+        # Funnel-specific visualizations
+        if 'By Funnel' in aggregations and not aggregations['By Funnel'].empty:
+            try:
+                # Prepare data
+                funnel_df = aggregations['By Funnel'].copy()
+                
+                # 1. Funnel violations bar chart
+                plt.figure(figsize=(12, max(6, len(funnel_df) * 0.8)))
+                
+                # Stacked bar chart showing different impact levels
+                bar_positions = range(len(funnel_df))
+                bar_height = 0.6
+                
+                plt.barh(bar_positions, funnel_df['Minor_Violations'], 
+                        height=bar_height, color=colors['minor'], label='Minor')
+                plt.barh(bar_positions, funnel_df['Moderate_Violations'], 
+                        height=bar_height, left=funnel_df['Minor_Violations'], 
+                        color=colors['moderate'], label='Moderate')
+                plt.barh(bar_positions, funnel_df['Serious_Violations'], 
+                        height=bar_height, 
+                        left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'], 
+                        color=colors['serious'], label='Serious')
+                plt.barh(bar_positions, funnel_df['Critical_Violations'], 
+                        height=bar_height, 
+                        left=funnel_df['Minor_Violations'] + funnel_df['Moderate_Violations'] + funnel_df['Serious_Violations'], 
+                        color=colors['critical'], label='Critical')
+                
+                # Add total count labels
+                for i, (total, score) in enumerate(zip(funnel_df['Total_Violations'], funnel_df['Priority_Score'])):
+                    plt.text(total + 0.5, i, f"{total} (Score: {score:.1f})", 
+                            va='center', fontsize=9, fontweight='bold')
+                
+                plt.yticks(bar_positions, funnel_df['funnel_name'])
+                plt.xlabel('Number of Violations')
+                plt.title('Accessibility Issues by Funnel', fontsize=16)
+                plt.legend(loc='upper right')
+                plt.grid(axis='x', linestyle='--', alpha=0.7)
+                plt.tight_layout()
+                
+                chart_path = charts_dir / 'chart_funnel_violations.png'
+                plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                chart_files['funnel_violations'] = str(chart_path)
+                
+                # 2. Funnel radar chart
+                # Only create if we have multiple funnels
+                if len(funnel_df) > 1:
+                    plt.figure(figsize=(10, 10))
+                    
+                    # Prepare normalized data for radar chart (all on same scale)
+                    # Use only top 3 funnels to avoid overcrowding
+                    top_funnels = funnel_df.head(3)
+                    
+                    # Categories for radar
+                    categories = ['Critical', 'Serious', 'Moderate', 'Minor', 'Avg Per Page']
+                    
+                    # Number of categories
+                    N = len(categories)
+                    
+                    # Create angle for each category
+                    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+                    angles += angles[:1]  # Close the loop
+                    
+                    # Initialize the radar plot
+                    ax = plt.subplot(111, polar=True)
+                    
+                    # Draw one axis per variable and add labels
+                    plt.xticks(angles[:-1], categories, size=10)
+                    
+                    # Draw y-axis labels
+                    ax.set_rlabel_position(0)
+                    plt.yticks([0.25, 0.5, 0.75, 1], ["0.25", "0.5", "0.75", "1"], 
+                              color="grey", size=8)
+                    plt.ylim(0, 1)
+                    
+                    # Plot each funnel
+                    for i, (idx, row) in enumerate(top_funnels.iterrows()):
+                        # Get data for this funnel
+                        values = [
+                            row['Critical_Violations'] / (funnel_df['Critical_Violations'].max() or 1),
+                            row['Serious_Violations'] / (funnel_df['Serious_Violations'].max() or 1),
+                            row['Moderate_Violations'] / (funnel_df['Moderate_Violations'].max() or 1),
+                            row['Minor_Violations'] / (funnel_df['Minor_Violations'].max() or 1),
+                            row['Avg_Per_Page'] / (funnel_df['Avg_Per_Page'].max() or 1)
+                        ]
+                        values += values[:1]  # Close the loop
+                        
+                        # Plot this funnel
+                        ax.plot(angles, values, linewidth=2, linestyle='solid', 
+                               label=row['funnel_name'])
+                        ax.fill(angles, values, alpha=0.1)
+                    
+                    # Add legend
+                    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+                    plt.title('Funnel Comparison (Normalized)', size=16)
+                    
+                    chart_path = charts_dir / 'chart_funnel_radar.png'
+                    plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    chart_files['funnel_radar'] = str(chart_path)
+                
+                # 3. Funnel steps heatmap
+                if 'By Funnel Step' in aggregations and not aggregations['By Funnel Step'].empty:
+                    step_df = aggregations['By Funnel Step'].copy()
+                    
+                    # Pivot data for heatmap
+                    if len(step_df) > 1:
+                        plt.figure(figsize=(12, 10))
+                        
+                        # Create pivot table: funnel_name vs funnel_step with total violations as values
+                        pivot_df = step_df.pivot_table(
+                            index='funnel_name',
+                            columns='funnel_step',
+                            values='Total_Violations',
+                            aggfunc='sum',
+                            fill_value=0
+                        )
+                        
+                        # Create heatmap
+                        sns.heatmap(pivot_df, annot=True, cmap='YlOrRd', fmt='g',
+                                   linewidths=0.5, linecolor='black')
+                        
+                        plt.title('Violations by Funnel Step', fontsize=16)
+                        plt.ylabel('Funnel')
+                        plt.xlabel('Step')
+                        plt.tight_layout()
+                        
+                        chart_path = charts_dir / 'chart_funnel_steps_heatmap.png'
+                        plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+                        plt.close()
+                        chart_files['funnel_steps_heatmap'] = str(chart_path)
+            except Exception as e:
+                self.logger.error(f"Error creating funnel visualizations: {e}")
                 
         return chart_files
     
@@ -1626,7 +1993,7 @@ class AccessibilityAnalyzer:
                             else:
                                 ws.write_string(start_row + r_idx, c_idx, str(value), cell_fmt)
                         except Exception as e:
-                            self.logger.error(f"Error writing cell ({start_row + r_idx}, {c_idx}): {e}")
+                            self.logger.error(f"Error writing cell ({start_row + r_idx}, c_idx): {e}")
                             ws.write(start_row + r_idx, c_idx, str(value), cell_format)
                 
                 end_row = start_row + len(dataframe) + 1
@@ -1870,6 +2237,168 @@ class AccessibilityAnalyzer:
                     recommendations_ws.write(row, 6, violation['Total_Violations'], num_format)
                     
                     row += 1
+        
+        # Create Funnel Analysis worksheet if funnel data exists
+        if 'By Funnel' in aggregations and not aggregations['By Funnel'].empty:
+            funnel_ws = workbook.add_worksheet('Funnel Analysis')
+            funnel_ws.set_column('A:A', 25)
+            funnel_ws.set_column('B:B', 15)
+            funnel_ws.set_column('C:C', 15)
+            funnel_ws.set_column('D:D', 15)
+            funnel_ws.set_column('E:E', 15)
+            funnel_ws.set_column('F:F', 20)
+            funnel_ws.set_column('G:G', 15)
+            
+            # Add title and introduction
+            funnel_ws.merge_range('A1:G1', 'User Journey Funnel Analysis', title_format)
+            funnel_ws.merge_range('A2:G2', 'Analysis of accessibility issues in defined user journeys and conversion funnels', 
+                                workbook.add_format({'italic': True, 'font_color': '#595959'}))
+            
+            row = 4
+            
+            # Funnel overview section
+            funnel_ws.merge_range(f'A{row}:G{row}', 'Funnel Overview', subtitle_format)
+            row += 1
+            
+            # Extract funnel metrics from metrics dictionary
+            funnel_metrics = metrics.get('Funnel Analysis', {})
+            
+            # Header row for overview table
+            funnel_ws.write(row, 0, 'Metric', header_format)
+            funnel_ws.write(row, 1, 'Value', header_format)
+            funnel_ws.write(row, 2, 'Description', header_format)
+            funnel_ws.merge_range(f'D{row+1}:G{row+1}', '', header_format)
+            row += 1
+            
+            # Add basic metrics
+            metrics_to_show = [
+                ('Total Funnels', 'Number of user funnels analyzed'),
+                ('Total Funnel Pages', 'Number of unique pages in all funnels'),
+                ('Total Funnel Violations', 'Total accessibility issues in funnel pages'),
+                ('Average Violations per Funnel Page', 'Average number of issues per funnel page'),
+                ('Critical Violations', 'Critical severity issues in funnels'),
+                ('Serious Violations', 'Serious severity issues in funnels'),
+                ('Most Problematic Funnel', 'Funnel with highest severity score')
+            ]
+            
+            for metric_name, description in metrics_to_show:
+                value = funnel_metrics.get(metric_name, 'N/A')
+                funnel_ws.write(row, 0, metric_name, cell_format)
+                
+                if 'Critical' in metric_name and isinstance(value, (int, float)) and value > 0:
+                    value_format = critical_format
+                elif isinstance(value, (int, float)):
+                    value_format = num_format
+                else:
+                    value_format = cell_format
+                    
+                funnel_ws.write(row, 1, value, value_format)
+                funnel_ws.write(row, 2, description, cell_format)
+                row += 1
+            
+            row += 2
+            
+            # Funnel comparison section
+            funnel_ws.merge_range(f'A{row}:G{row}', 'Funnel Comparison', subtitle_format)
+            row += 1
+            
+            funnel_df = aggregations['By Funnel']
+            
+            # Write funnel comparison header
+            columns = ['Funnel Name', 'Pages', 'Total Violations', 'Critical', 'Serious', 'Avg Per Page', 'Priority Score']
+            for i, col in enumerate(columns):
+                funnel_ws.write(row, i, col, header_format)
+            row += 1
+            
+            # Write funnel comparison data
+            for _, funnel_row in funnel_df.iterrows():
+                funnel_ws.write(row, 0, funnel_row['funnel_name'], cell_format)
+                funnel_ws.write(row, 1, funnel_row['Pages'], num_format)
+                funnel_ws.write(row, 2, funnel_row['Total_Violations'], num_format)
+                
+                # Critical violations with conditional formatting
+                if funnel_row['Critical_Violations'] > 0:
+                    funnel_ws.write(row, 3, funnel_row['Critical_Violations'], critical_format)
+                else:
+                    funnel_ws.write(row, 3, funnel_row['Critical_Violations'], num_format)
+                    
+                funnel_ws.write(row, 4, funnel_row['Serious_Violations'], num_format)
+                funnel_ws.write(row, 5, funnel_row['Avg_Per_Page'], num_format)
+                
+                # Priority score with conditional formatting
+                score = funnel_row['Priority_Score']
+                if score > 10:
+                    score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFCCCB', 'border': 1})
+                elif score > 5:
+                    score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFDEAD', 'border': 1})
+                else:
+                    score_format = num_format
+                    
+                funnel_ws.write(row, 6, score, score_format)
+                row += 1
+            
+            row += 2
+            
+            # Add funnel step analysis if available
+            if 'By Funnel Step' in aggregations and not aggregations['By Funnel Step'].empty:
+                funnel_ws.merge_range(f'A{row}:G{row}', 'Funnel Step Analysis', subtitle_format)
+                row += 1
+                
+                step_df = aggregations['By Funnel Step']
+                
+                # Write step analysis header
+                step_columns = ['Funnel', 'Step', 'Violations', 'Critical', 'Serious', 'Moderate', 'Priority Score']
+                for i, col in enumerate(step_columns):
+                    funnel_ws.write(row, i, col, header_format)
+                row += 1
+                
+                # Limit to top 15 most problematic steps
+                top_steps = step_df.head(15)
+                
+                # Write step analysis data
+                for idx, step_row in top_steps.iterrows():
+                    funnel_ws.write(row, 0, step_row['funnel_name'], cell_format)
+                    funnel_ws.write(row, 1, step_row['funnel_step'], cell_format)
+                    funnel_ws.write(row, 2, step_row['Total_Violations'], num_format)
+                    
+                    # Critical violations with conditional formatting
+                    if step_row['Critical_Violations'] > 0:
+                        funnel_ws.write(row, 3, step_row['Critical_Violations'], critical_format)
+                    else:
+                        funnel_ws.write(row, 3, step_row['Critical_Violations'], num_format)
+                        
+                    funnel_ws.write(row, 4, step_row['Serious_Violations'], num_format)
+                    funnel_ws.write(row, 5, step_row['Moderate_Violations'], num_format)
+                    
+                    # Priority score with conditional formatting
+                    score = step_row['Priority_Score']
+                    if score > 8:
+                        score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFCCCB', 'border': 1})
+                    elif score > 4:
+                        score_format = workbook.add_format({'num_format': '#,##0', 'bg_color': '#FFDEAD', 'border': 1})
+                    else:
+                        score_format = num_format
+                        
+                    funnel_ws.write(row, 6, score, score_format)
+                    row += 1
+        
+        # Insert funnel charts if available
+        row += 2
+        chart_row = row
+        
+        if 'funnel_violations' in chart_files:
+            funnel_ws.merge_range(f'A{chart_row}:G{chart_row}', 'Funnel Visualizations', subtitle_format)
+            chart_row += 1
+            
+            funnel_ws.insert_image(chart_row, 0, chart_files['funnel_violations'], {'x_scale': 0.6, 'y_scale': 0.6})
+            chart_row += 20
+            
+            if 'funnel_radar' in chart_files:
+                funnel_ws.insert_image(chart_row, 0, chart_files['funnel_radar'], {'x_scale': 0.6, 'y_scale': 0.6})
+                chart_row += 20
+                
+            if 'funnel_steps_heatmap' in chart_files:
+                funnel_ws.insert_image(chart_row, 0, chart_files['funnel_steps_heatmap'], {'x_scale': 0.6, 'y_scale': 0.6})
         
         self.logger.info(f"Report generated successfully: {output_excel}")
         
