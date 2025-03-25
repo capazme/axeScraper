@@ -532,21 +532,21 @@ class Pipeline:
             self.logger.info(f"Utilizzo file stato crawler: {analysis_state_file}")
         
         try:
-            # Crea analyzer con percorsi standardizzati
             analyzer = AxeAnalysis(
                 urls=None,
                 analysis_state_file=analysis_state_file if crawler_file_exists else None,
                 domains=axe_config.get("domains"),
-                max_templates_per_domain=max_templates,  # Usa il valore standardizzato
+                max_templates_per_domain=max_templates,
                 fallback_urls=fallback_urls,
-                pool_size=pool_size,  # Usa il valore standardizzato
-                sleep_time=sleep_time,  # Usa il valore standardizzato
+                pool_size=pool_size,
+                sleep_time=sleep_time,
                 excel_filename=excel_filename,
                 visited_file=visited_file,
-                headless=headless,  # Usa il valore standardizzato
-                resume=resume,  # Usa il valore standardizzato
+                headless=headless,
+                resume=resume,
                 output_folder=str(output_manager.get_path("axe")),
-                output_manager=output_manager
+                output_manager=output_manager,
+                auth_manager=self.auth_manager  # Pass auth_manager here
             )
             
             # Esegui analisi in un thread per evitare blocco asyncio
@@ -686,35 +686,53 @@ class Pipeline:
             self.logger.exception(f"Error generating final report: {e}")
             return None   
         
-    async def run_authentication(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> bool:
-        """Perform authentication for a domain."""
+    async def run_authentication(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Tuple[bool, List[str]]:
+        """Initialize authentication and collect restricted URLs without forcing login."""
         self.logger.info(f"Initializing authentication for {base_url}")
         
         if not self.config_manager.get_bool("AUTH_ENABLED", False):
             self.logger.info(f"Authentication disabled for {base_url}")
-            return False
+            return False, []
             
         try:
+            # Calculate the domain slug exactly as used in config
+            domain_slug = self.config_manager.domain_to_slug(base_url)
+            self.logger.info(f"Domain slug for auth: {domain_slug} (from {base_url})")
+            
             self.auth_manager = AuthenticationManager(
                 config_manager=self.config_manager,
                 domain=base_url,
                 output_manager=output_manager
             )
             
-            success = self.auth_manager.login()
+            # Get restricted URLs directly from config without requiring authentication
+            restricted_urls = self._get_restricted_urls(domain_slug)
+            self.logger.info(f"Found {len(restricted_urls)} restricted URLs for {domain_slug}")
             
-            if success:
-                self.logger.info(f"Authentication successful for {base_url}")
-                authenticated_urls = self.auth_manager.collect_authenticated_urls()
-                self.logger.info(f"Collected {len(authenticated_urls)} authenticated URLs for analysis")
-            else:
-                self.logger.error(f"Authentication failed for {base_url}")
-                
-            return success
+            return True, restricted_urls
         except Exception as e:
-            self.logger.exception(f"Error in authentication: {e}")
-            return False
-
+            self.logger.exception(f"Error in authentication setup: {e}")
+            return False, []
+    
+    def _get_restricted_urls(self, domain_slug: str) -> List[str]:
+        """Get restricted URLs directly from config."""
+        auth_domains = self.config_manager.get("AUTH_DOMAINS", {})
+        self.logger.info(f"Available AUTH_DOMAINS keys: {list(auth_domains.keys())}")
+        
+        if domain_slug in auth_domains:
+            urls = auth_domains[domain_slug].get("restricted_urls", [])
+            self.logger.info(f"Found restricted URLs in config: {urls}")
+            return urls
+        
+        # Try alternative formats of the domain slug
+        alt_slug = domain_slug.replace("_", "")
+        if alt_slug in auth_domains:
+            self.logger.info(f"Found match with alternative slug format: {alt_slug}")
+            return auth_domains[alt_slug].get("restricted_urls", [])
+            
+        self.logger.warning(f"No restricted URLs found for domain slug '{domain_slug}'")
+        return []  
+     
     async def run_funnel_analysis(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Dict[str, Any]:
         """Run funnel analysis for a domain."""
         self.logger.info(f"Running funnel analysis for {base_url}")
@@ -937,159 +955,125 @@ class Pipeline:
         Returns:
             Percorso del report finale o None
         """
-        self.logger.info(f"Elaborazione {base_url} attraverso il pipeline")
+        self.logger.info(f"Processing {base_url} through pipeline")
         
-        # Ottieni configurazione dominio
+        # Get domain configuration
         domain_config = self.config_manager.load_domain_config(base_url)
         
-        # Crea output manager per questo dominio
-        output_root = self.config_manager.get_path("OUTPUT_DIR", "~/axeScraper/output", create=True)
-        clean_domain = base_url.replace("http://", "").replace("https://", "").replace("www.", "")
-        clean_domain = clean_domain.split('/')[0]
-        
+        # Create output manager
         output_manager = OutputManager(
-            base_dir=output_root,
-            domain=clean_domain,
+            base_dir=self.config_manager.get_path("OUTPUT_DIR", "~/axeScraper/output", create=True),
+            domain=base_url,
             create_dirs=True
         )
         
-        # Memorizza l'output manager per riferimento futuro
-        self.output_managers[base_url] = output_manager 
+        # Initialize authentication (don't login yet) and get restricted URLs 
+        auth_setup_success, restricted_urls = await self.run_authentication(base_url, domain_config, output_manager)
         
-        # Ottieni configurazione pipeline con chiavi standardizzate
+        # Log the results for debugging
+        if auth_setup_success:
+            self.logger.info(f"Authentication setup successful, found {len(restricted_urls)} restricted URLs")
+            if restricted_urls:
+                self.logger.info(f"First few restricted URLs: {restricted_urls[:3]}")
+        
+        # Get pipeline configuration with standardized keys
         start_stage = self.pipeline_config.get("start_stage") or self.config_manager.get("START_STAGE", "crawler")
         repeat_axe = self.pipeline_config.get("repeat_axe") or self.config_manager.get_int("REPEAT_ANALYSIS", 1)
         
-        # Log configurazione per debug
-        self.logger.info(f"Pipeline config: START_STAGE={start_stage}, REPEAT_ANALYSIS={repeat_axe}")
-        self.logger.info(f"Output manager: base_dir={output_manager.base_dir}, domain={output_manager.domain}")
-        
-        # Esegui crawler se iniziamo da quella fase
+        # Run crawler if starting from that phase
         if start_stage == "crawler":
-            self.logger.info(f"Partenza da fase crawler per {base_url}")
+            self.logger.info(f"Starting from crawler phase for {base_url}")
             try:
                 crawler_success = await self.run_crawler(base_url, domain_config, output_manager)
                 
                 if not crawler_success:
-                    self.logger.warning(f"Fase crawler fallita per {base_url}, continuo con il pipeline")
+                    self.logger.warning(f"Crawler phase failed for {base_url}, continuing pipeline")
                     
                 if self.shutdown_flag:
-                    self.logger.warning(f"Interruzione richiesta dopo fase crawler per {base_url}")
+                    self.logger.warning(f"Shutdown requested after crawler phase for {base_url}")
                     return None
             except Exception as e:
-                self.logger.exception(f"Errore non gestito in fase crawler: {e}")
-                self.logger.warning(f"Continuo nonostante errore crawler per {base_url}")
+                self.logger.exception(f"Unhandled error in crawler phase: {e}")
+                self.logger.warning(f"Continuing despite crawler error for {base_url}")
         else:
-            self.logger.info(f"Salto fase crawler per {base_url} (partenza da {start_stage})")
-        
-        # Run authentication if needed
-        auth_success = False
-        authenticated_urls = []
-        if start_stage in ["crawler", "auth", "axe"]:
-            auth_success = await self.run_authentication(base_url, domain_config, output_manager)
-            if auth_success and self.auth_manager:
-                authenticated_urls = self.auth_manager.collect_authenticated_urls()
-                self.logger.info(f"Authentication successful, collected {len(authenticated_urls)} restricted URLs")
+            self.logger.info(f"Skipping crawler phase for {base_url} (starting from {start_stage})")
 
-        # Run funnel analysis with metadata collection
-        funnel_results = {}
-        funnel_urls = []
+        # Run standard accessibility analysis
+        if start_stage in ["crawler", "auth", "axe"]:
+            # Standard analysis without authentication
+            await self.run_axe_analysis(base_url, domain_config, output_manager)
+            
+            # Special handling for restricted URLs
+            if restricted_urls:
+                self.logger.info(f"Running dedicated analysis on {len(restricted_urls)} restricted URLs")
+                
+                # Create separate output manager for authenticated content
+                auth_output_manager = OutputManager(
+                    base_dir=output_manager.base_dir,
+                    domain=f"{output_manager.domain_slug}_auth",
+                    create_dirs=True
+                )
+                
+                # Only attempt authentication now if we have restricted URLs to analyze
+                auth_success = False
+                if auth_setup_success and self.auth_manager:
+                    self.logger.info("Performing authentication for restricted URL analysis")
+                    auth_success = self.auth_manager.login()
+                    
+                    if not auth_success:
+                        self.logger.warning("Authentication failed, restricted URLs may not be accessible")
+                
+                # Run specific analysis for restricted URLs with auth_manager
+                await self.run_axe_analysis_on_urls(
+                    base_url, 
+                    domain_config, 
+                    auth_output_manager,
+                    restricted_urls,
+                    auth_manager=self.auth_manager
+                )
+                
+                # Generate report for authenticated content
+                auth_report_path = await self.run_report_analysis(
+                    base_url, 
+                    domain_config, 
+                    auth_output_manager
+                )
+                
+                if auth_report_path:
+                    self.logger.info(f"Generated authenticated area report: {auth_report_path}")
+
+        # Run funnel analysis
         funnel_metadata = {}
         funnel_violations_df = None
         if start_stage in ["crawler", "auth", "axe", "funnel"]:
             funnel_analysis_result = await self.run_funnel_analysis(base_url, domain_config, output_manager)
             if funnel_analysis_result.get('enabled', False):
-                funnel_results = funnel_analysis_result.get('funnels', {})
                 funnel_metadata = funnel_analysis_result.get('metadata', {})
                 funnel_violations_df = funnel_analysis_result.get('violations_df', None)
-                if self.funnel_manager:
-                    funnel_urls = self.funnel_manager.get_all_visited_urls()
-                    self.logger.info(f"Collected {len(funnel_urls)} URLs from funnel analysis")
 
-        # Combine special URLs for scanning
-        special_urls = list(set(authenticated_urls + funnel_urls))
-
-        # Run standard analysis
-        if start_stage in ["crawler", "auth", "axe"]:
-            self.logger.info(f"Esecuzione analisi Axe per {base_url} ({repeat_axe} iterazioni)")
-            
-            axe_success = False
-            for i in range(repeat_axe):
-                self.logger.info(f"Iterazione analisi Axe {i+1}/{repeat_axe} per {base_url}")
-                try:
-                    iteration_success = await self.run_axe_analysis(base_url, domain_config, output_manager)
-                    axe_success = axe_success or iteration_success
-                    
-                    if not iteration_success:
-                        self.logger.warning(f"Iterazione analisi Axe {i+1} fallita per {base_url}")
-                        
-                    if self.shutdown_flag:
-                        self.logger.warning(f"Interruzione richiesta durante analisi Axe per {base_url}")
-                        return None
-                except Exception as e:
-                    self.logger.exception(f"Errore non gestito in iterazione analisi Axe {i+1}: {e}")
-                    
-                # Pausa tra iterazioni
-                if i < repeat_axe - 1:
-                    await asyncio.sleep(1)
-                    
-            if not axe_success:
-                self.logger.error(f"Tutte le iterazioni analisi Axe fallite per {base_url}")
-                self.logger.warning(f"Continuo alla fase report finale nonostante fallimenti Axe")
-            
-            # Add additional scanning for authenticated URLs
-            if special_urls:
-                self.logger.info(f"Running separate analysis on {len(special_urls)} authenticated and funnel URLs")
-                try:
-                    # Create a separate output manager for authenticated content
-                    auth_output_manager = OutputManager(
-                        base_dir=output_manager.base_dir,
-                        domain=f"{output_manager.domain_slug}_auth",
-                        create_dirs=True
-                    )
-                    
-                    await self.run_axe_analysis_on_urls(
-                        base_url, 
-                        domain_config, 
-                        auth_output_manager,
-                        special_urls,
-                        auth_manager=self.auth_manager if auth_success else None
-                    )
-                    
-                    # Don't forget to analyze this report too
-                    auth_report_path = await self.run_report_analysis(
-                        base_url, 
-                        domain_config, 
-                        auth_output_manager
-                    )
-                    
-                    if auth_report_path:
-                        self.logger.info(f"Generated authenticated area report: {auth_report_path}")
-                except Exception as e:
-                    self.logger.exception(f"Error analyzing authenticated URLs: {e}")
-
-        # Add funnel metadata to main analysis results
+        # Generate final report with all data
         if not self.shutdown_flag:
             try:
-                # Add metadata to main results
-                self._add_funnel_metadata_to_axe_results(
-                    output_manager.get_path("axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"),
-                    funnel_metadata
+                # Add funnel metadata to main results
+                if funnel_metadata:
+                    self._add_funnel_metadata_to_axe_results(
+                        output_manager.get_path("axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"),
+                        funnel_metadata
+                    )
+                
+                # Generate final report
+                report_path = await self.run_report_analysis(
+                    base_url,
+                    domain_config,
+                    output_manager,
+                    funnel_metadata=funnel_metadata,
+                    funnel_violations_df=funnel_violations_df
                 )
                 
-                # Generate report with funnel data
-                report_path = await self.run_report_analysis(
-                        base_url, 
-                        domain_config, 
-                        output_manager,
-                        funnel_metadata=funnel_metadata,
-                        funnel_violations_df=funnel_violations_df
-                    )
-   
                 if report_path:
-                    self.logger.info(f"Report generated with funnel data for {base_url}: {report_path}")
+                    self.logger.info(f"Final report generated for {base_url}: {report_path}")
                     return report_path
-                
+                    
             except Exception as e:
                 self.logger.exception(f"Error in final report generation: {e}")
                 return None

@@ -405,28 +405,32 @@ class AuthenticationManager:
             self.logger.error(f"Error applying authentication to driver: {e}")
             return False
     
-    def collect_authenticated_urls(self) -> List[str]:
+    def collect_authenticated_urls(self, require_auth=True) -> List[str]:
         """
         Collect URLs of authenticated sections for analysis.
         
+        Args:
+            require_auth: Whether authentication is required to collect URLs
+            
         Returns:
             List of URLs in authenticated sections
         """
-        if not self.is_authenticated:
+        if require_auth and not self.is_authenticated:
             self.logger.warning("Cannot collect authenticated URLs - not authenticated")
             return []
             
         try:
             self.authenticated_urls = []
             domain_slug = self.config_manager.domain_to_slug(self.domain) if self.domain else None
+            self.logger.info(f"Collecting restricted URLs for domain slug: {domain_slug}")
             
             if domain_slug and domain_slug in self.auth_config["domains"]:
                 # Get restricted URLs for this domain
                 restricted_urls = self.auth_config["domains"][domain_slug].get("restricted_urls", [])
                 explore_restricted = self.auth_config["domains"][domain_slug].get("explore_restricted_area", False)
                 
-                if not explore_restricted:
-                    # Just use the specified restricted URLs
+                # If not authenticated or exploration disabled, just return the static list 
+                if not self.is_authenticated or not explore_restricted:
                     self.authenticated_urls = restricted_urls.copy()
                     self.logger.info(f"Using {len(self.authenticated_urls)} specified restricted URLs for analysis")
                 else:
@@ -451,6 +455,14 @@ class AuthenticationManager:
                             self.logger.warning(f"Error exploring {base_url}: {e}")
                     
                     self.logger.info(f"Collected {len(self.authenticated_urls)} authenticated URLs")
+            else:
+                self.logger.warning(f"Domain slug '{domain_slug}' not found in AUTH_DOMAINS")
+                # Try alternative formats
+                alt_slug = domain_slug.replace("_", "")
+                if alt_slug in self.auth_config["domains"]:
+                    restricted_urls = self.auth_config["domains"][alt_slug].get("restricted_urls", [])
+                    self.authenticated_urls = restricted_urls.copy()
+                    self.logger.info(f"Found {len(self.authenticated_urls)} restricted URLs with alternate slug format")
             
             return self.authenticated_urls
                 

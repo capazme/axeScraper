@@ -37,7 +37,6 @@ from utils.config_manager import ConfigurationManager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
 
-global logger
 
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")
@@ -423,8 +422,17 @@ class AxeAnalysis:
             output_manager: Output manager instance
             auth_manager: Authentication manager instance
         """
+        global logger
+
         # Use output manager if provided
         self.output_manager = output_manager
+        
+                # Update logger with output manager if available
+        logger = get_logger(
+            "axe_analysis",
+            config_manager.get_logging_config()["components"]["axe_analysis"],
+            output_manager=output_manager
+        )
         
         # Use configuration manager for defaults
         self.config = config_manager.get_nested("axe_config", {})

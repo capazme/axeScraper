@@ -370,13 +370,17 @@ class FunnelManager:
         
         # Handle authentication if required
         if funnel.get("auth_required", False) and self.auth_manager:
+            self.logger.info(f"Funnel {funnel_id} requires authentication")
             if not self.auth_manager.is_authenticated:
+                self.logger.info("Logging in for funnel execution")
                 if not self.auth_manager.login():
                     self.logger.error(f"Cannot execute funnel {funnel_id} - Authentication failed")
                     return []
             
             # Apply authentication to this driver
             self.auth_manager.apply_auth_to_driver(self.driver)
+        else:
+            self.logger.info(f"Funnel {funnel_id} does not require authentication")
         
         # Track results for each step
         results = []

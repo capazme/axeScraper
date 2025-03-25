@@ -31,11 +31,11 @@
   "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
   
   "CRAWLER_MAX_WORKERS": 16,
-  "CRAWLER_MAX_URLS": 50,
+  "CRAWLER_MAX_URLS": 500,
   "CRAWLER_MAX_RETRIES": 10,
   "CRAWLER_REQUEST_DELAY": 0.5,
   "CRAWLER_HYBRID_MODE": true,
-  "CRAWLER_PENDING_THRESHOLD": 30,
+  "CRAWLER_PENDING_THRESHOLD": 300,
   
   "AXE_MAX_TEMPLATES": 500000,
   "AXE_POOL_SIZE": 5,
@@ -66,7 +66,7 @@
   ],
   
   "AUTH_DOMAINS": {
-    "example_com": {
+    "locautorent_com": {
       "restricted_urls": [
         "https://www.locautorent.com/it/mylocauto/#/dashboard/profile",
         "https://www.locautorent.com/it/mylocauto/#/dashboard/account",
@@ -141,8 +141,8 @@
             {"type": "cookie_banner"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(2) > div > div > input[type=text]", "value": "Test Name"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(3) > div > div > input[type=text]", "value": "Test Surname"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(4) > div > div > input[type=text]", "value": "roma.05@sapglegal.com"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(5) > div > div > input[type=text]", "value": "roma.05@sapglegal.com"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(4) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
+            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(5) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(6) > div > div > input[type=password]", "value": "Securepassword123!"},
             {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(7) > div > div > input[type=password]", "value": "Securepassword123!"},
             {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.checkboxsWrapper > div:nth-child(1) > label > i"},
