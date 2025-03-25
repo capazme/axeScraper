@@ -739,12 +739,7 @@ class ConfigurationManager:
         }
     
     def get_logging_config(self) -> Dict[str, Any]:
-        """
-        Ottiene la configurazione del logging.
-        
-        Returns:
-            Configurazione del logging
-        """
+        """Get logging configuration with explicit file names."""
         output_root = self.get_path("OUTPUT_DIR", "~/axeScraper/output")
         log_dir = self.get_path("LOG_DIR", output_root / "logs", create=True)
         
@@ -758,7 +753,7 @@ class ConfigurationManager:
             "max_bytes": self.get_int("LOG_MAX_BYTES", 10 * 1024 * 1024),  # 10 MB
             "backup_count": self.get_int("LOG_BACKUP_COUNT", 5),
             
-            # Livelli di log specifici per componente
+            # Clear, explicit component log files
             "components": {
                 "crawler": {
                     "level": self.get("CRAWLER_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
@@ -775,10 +770,18 @@ class ConfigurationManager:
                 "pipeline": {
                     "level": self.get("PIPELINE_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
                     "log_file": "pipeline.log"
+                },
+                "auth_manager": {
+                    "level": self.get("AUTH_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
+                    "log_file": "auth_manager.log"
+                },
+                "funnel_manager": {
+                    "level": self.get("FUNNEL_LOG_LEVEL", self.get("LOG_LEVEL", "INFO")),
+                    "log_file": "funnel_manager.log"
                 }
             }
         }
-    
+        
     def get_email_config(self) -> Dict[str, Any]:
         """
         Ottiene la configurazione dell'email.

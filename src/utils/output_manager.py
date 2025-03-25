@@ -113,6 +113,16 @@ class OutputManager:
         filename = f"{base_filename}_{self.timestamp}{ext}"
         return self.get_path(component, filename)
     
+    def ensure_log_path_exists(self, component_name: str) -> Path:
+        """Ensure log directory exists and return path for component log file."""
+        log_dir = self.get_path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Print debug info
+        print(f"Log directory for {component_name}: {log_dir}")
+        
+        return log_dir
+
     def backup_existing_file(self, component: str, filename: str, max_backups: int = 5) -> Optional[Path]:
         """Backup an existing file if it exists."""
         file_path = self.get_path(component, filename)

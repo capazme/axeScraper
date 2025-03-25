@@ -37,10 +37,12 @@ from utils.config_manager import ConfigurationManager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
 
+global logger
+
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")
 
-# Set up logger with axe-specific configuration
+# Set up logger without output manager initially
 logger = get_logger("axe_analysis", config_manager.get_logging_config()["components"]["axe_analysis"])
 
 # Auto-save interval
@@ -484,6 +486,14 @@ class AxeAnalysis:
         # If auth_manager is provided, log it
         if self.auth_manager:
             logger.info("Authentication manager provided, will be used for restricted areas")
+        
+        # Update logger with output manager if available
+        
+        logger = get_logger(
+            "axe_analysis", 
+            config_manager.get_logging_config()["components"]["axe_analysis"],
+            output_manager=output_manager
+        )
 
     def _load_visited(self) -> None:
         """Load already processed URLs from the visited file."""

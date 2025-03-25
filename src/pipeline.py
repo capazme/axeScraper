@@ -72,8 +72,11 @@ class Pipeline:
         if self.config_manager.get_bool("DEBUG", False):
             self.config_manager.set_debug_mode(True)
         
-        # Configura il logger
-        self.logger = get_logger("pipeline", self.config_manager.get_logging_config()["components"]["pipeline"])
+        # Configura il logger con output manager
+        self.logger = get_logger(
+            "pipeline", 
+            self.config_manager.get_logging_config()["components"]["pipeline"]
+        )
         
         # Mostra riepilogo configurazione all'avvio
         self.config_manager.log_config_summary()

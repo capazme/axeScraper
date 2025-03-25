@@ -40,33 +40,40 @@ def setup_logging(
     
     # Add file handler if log_dir is specified
     if log_dir:
-        log_dir_path = Path(log_dir)
-        log_dir_path.mkdir(parents=True, exist_ok=True)
-        
-        if log_file is None:
-            log_file = f"{component_name}.log"
+        try:
+            # Convert to Path and ensure directory exists
+            log_dir_path = Path(log_dir)
+            log_dir_path.mkdir(parents=True, exist_ok=True)
             
-        log_file_path = log_dir_path / log_file
-        
-        if rotating_logs:
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file_path,
-                maxBytes=max_bytes,
-                backupCount=backup_count
-            )
-        else:
-            file_handler = logging.FileHandler(log_file_path)
+            if log_file is None:
+                log_file = f"{component_name}.log"
+                
+            log_file_path = log_dir_path / log_file
             
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+            print(f"Setting up log file for {component_name} at: {log_file_path}")
+            
+            if rotating_logs:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    log_file_path,
+                    maxBytes=max_bytes,
+                    backupCount=backup_count
+                )
+            else:
+                file_handler = logging.FileHandler(log_file_path)
+                
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            print(f"Successfully added file handler for {component_name}")
+        except Exception as e:
+            print(f"Error setting up log file for {component_name}: {e}")
+            # Continue with console logging even if file logging fails
     
     # Add console handler if requested
-    if console_output and not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    if console_output:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-    
     # Log startup message
     logger.info(f"Logger initialized for {component_name} - level: {log_level}")
     if log_dir:
@@ -74,19 +81,8 @@ def setup_logging(
     
     return logger
 
-def get_logger(component_name: str, log_config: Optional[Dict[str, Any]] = None, 
-               output_manager: Optional[Any] = None) -> logging.Logger:
-    """
-    Get or create a logger with standardized configuration.
-    
-    Args:
-        component_name: Name of the component requesting the logger
-        log_config: Optional logging configuration
-        output_manager: Optional output manager for path resolution
-        
-    Returns:
-        Configured logger instance
-    """
+def get_logger(component_name, log_config=None, output_manager=None):
+    """Get properly configured logger with file output."""
     # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
     
@@ -97,62 +93,32 @@ def get_logger(component_name: str, log_config: Optional[Dict[str, Any]] = None,
     # Prevent propagation to parent loggers to avoid duplication
     logger.propagate = False
     
-    try:
-        # Only attempt to import if needed
-        if not log_config:
-            # Import dynamically to avoid circular imports
-            from utils.config_manager import get_config_manager
-            
-            # Get or create configuration manager
-            config_manager = get_config_manager()
-            if config_manager:
-                log_config = config_manager.get_logging_config().get("components", {}).get(component_name, {})
-    except ImportError:
-        # If import fails, use default config
-        pass
-        
-    # Use default log level if not specified in config
-    log_level = log_config.get("level", "INFO") if log_config else "INFO"
+    # Default log configuration
+    log_level = "INFO"
+    log_file = f"{component_name}.log"
     
-    # Get log directory from output_manager if provided
+    # Get component-specific configuration if available
+    if log_config:
+        log_level = log_config.get("level", log_level)
+        log_file = log_config.get("log_file", log_file)
+    
+    # Determine log directory - create it explicitly
+    log_dir = "./logs"  # Default fallback
+    
     if output_manager:
-        log_dir = output_manager.get_path("logs")
-        log_file = f"{component_name}.log"
-    else:
-        log_dir = Path("./logs")
-        log_file = f"{component_name}.log"
-
-    # Ensure log directory exists
-    os.makedirs(log_dir, exist_ok=True)
+        try:
+            # Explicitly ensure log directory exists
+            log_dir = output_manager.ensure_log_path_exists(component_name)
+            print(f"Using output_manager log path for {component_name}: {log_dir}")
+        except Exception as e:
+            print(f"Error getting log path from output_manager: {e}")
     
-    # Create file handler
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / log_file,
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
+    # Set up logging with explicit path creation
+    return setup_logging(
+        log_level=log_level,
+        log_dir=log_dir,
+        log_file=log_file,
+        component_name=component_name,
+        console_output=True,
+        rotating_logs=True
     )
-    
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Set formatter for handlers
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
-    # Set log level for handlers
-    file_handler.setLevel(log_level)
-    console_handler.setLevel(log_level)
-    
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    # Set logger level
-    logger.setLevel(log_level)
-    
-    return logger

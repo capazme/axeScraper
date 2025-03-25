@@ -38,9 +38,12 @@ class AccessibilityAnalyzer:
     
     def __init__(self, log_level=None, max_workers=None, output_manager=None):
         """Initialize the analyzer with logging configuration and parallelism options."""
-        # Use standardized logging from configuration manager
-        self.logger = get_logger("report_analysis", 
-                           config_manager.get_logging_config()["components"]["report_analysis"])
+        # Use standardized logging from configuration manager with output manager
+        self.logger = get_logger(
+            "report_analysis", 
+            config_manager.get_logging_config()["components"]["report_analysis"],
+            output_manager=output_manager
+        )
         
         # Store output manager if provided
         self.output_manager = output_manager
