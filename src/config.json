@@ -98,12 +98,12 @@
         {
           "name": "LandingPage",
           "url": "https://www.locautorent.com/it/ab-testing-enable-version/?code=9N0C47hqP2o5HTU4QhPx0K1b&version=v1",
-          "wait_for_selector": "#header > div.wrapper > div > div:nth-child(3) > a",
+          "wait_for_selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div:nth-child(1) > div.col-12.col-lg-5 > div > div.FormFieldCmp.FormInputTextCmp.FormInputTextCmpExtended.combobox > div > div",
           "actions": [
             {"type": "cookie_banner"},
             {"type": "wait", "seconds": 2},
             {"type": "screenshot", "filename": "landing_page.png"},
-            {"type": "click", "selector": "#form-field-pickup_date"},
+            {"type": "click", "selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div:nth-child(1) > div.col-12.col-lg-5 > div > div.FormFieldCmp.FormInputTextCmp.FormInputTextCmpExtended.combobox > div > div"},
             {"type": "wait", "seconds": 3},
             {"type": "screenshot", "filename": "open_form.png"}
           ],
@@ -136,63 +136,6 @@
           "success_condition": {
             "type": "element_visible",
             "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"
-          }
-        },
-        {
-          "name": "ChooseCar",
-          "wait_for_selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"},
-            {"type": "wait", "seconds": 5},
-            {"type": "screenshot", "filename": "car_details.png"}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"
-          }
-        },
-        {
-          "name": "ChooseCoverage",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"},
-            {"type": "wait", "seconds": 10},
-            {"type": "screenshot", "filename": "after_submit_coverage.png"}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "text": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"
-          }
-        },
-        {
-          "name": "ExtraOptions",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"},
-            {"type": "wait", "seconds": 10},
-            {"type": "screenshot", "filename": "after_submit_extra.png"}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "text": "#vue3-app-root-1-0 > div > div > div > div.BookingEndCmp.container.pt-md > div > div.col-4 > div > div.CarRecapCardCmp.h-100"
-          }
-        },
-        {
-          "name": "Checkout",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#form-field-termsAndConditions"},
-            {"type": "wait", "seconds": 2},
-            {"type": "screenshot", "filename": "terms_click.png"},
-            {"type": "click", "selector": "#booking-end-complete-anchor-target > form > div > div:nth-child(8) > div > div > button"},
-            {"type": "wait", "seconds": 10},
-            {"type": "screenshot", "filename": "final_checkout.png"},
-            {"type": "wait", "seconds": 20}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "text": "body > div.DialogCmp.d-flex.justify-content-center.align-items-center.DialogCarCardCmp.vfm.vfm--fixed.vfm--inset > div.vfm__content.vfm--outline-none > div"
           }
         }
       ]

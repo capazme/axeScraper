@@ -350,6 +350,67 @@ class FunnelManager:
             self.logger.error(f"Error saving screenshot: {e}")
             return None
 
+    def _set_ab_testing_cookies(self, params):
+        """Set AB testing cookies with correct domain formats"""
+        if not params:
+            return
+            
+        current_url = self.driver.current_url
+        from urllib.parse import urlparse
+        domain = urlparse(current_url).netloc
+        
+        # Remove 'www.' prefix if present
+        if domain.startswith('www.'):
+            domain = domain[4:]
+            
+        domains_to_try = [
+            f".{domain}",  # Most reliable for cross-subdomain
+            domain,
+            f"www.{domain}"
+        ]
+        
+        self.logger.info(f"Setting AB testing cookies for {current_url}")
+        
+        for cookie_domain in domains_to_try:
+            try:
+                self.logger.info(f"Trying cookie domain: {cookie_domain}")
+                
+                if "version" in params:
+                    self.driver.add_cookie({
+                        "name": "ab_testing_version", 
+                        "value": params["version"],
+                        "domain": cookie_domain,
+                        "path": "/"
+                    })
+                    
+                if "code" in params:
+                    self.driver.add_cookie({
+                        "name": "ab_testing_code", 
+                        "value": params["code"],
+                        "domain": cookie_domain,
+                        "path": "/"
+                    })
+                
+                # Try localStorage as fallback
+                try:
+                    self.driver.execute_script(
+                        f"localStorage.setItem('ab_testing_version', '{params.get('version', '')}');"
+                    )
+                    self.driver.execute_script(
+                        f"localStorage.setItem('ab_testing_code', '{params.get('code', '')}');"
+                    )
+                    self.logger.info("Set AB testing parameters in localStorage")
+                except Exception as ls_error:
+                    self.logger.warning(f"Error setting localStorage: {ls_error}")
+                    
+            except Exception as e:
+                self.logger.warning(f"Error setting cookies for {cookie_domain}: {e}")
+        
+        all_cookies = self.driver.get_cookies()
+        self.logger.info(f"Cookies after setting ({len(all_cookies)}):")
+        for cookie in all_cookies:
+            self.logger.info(f"  {cookie['name']} = {cookie['value']} (domain: {cookie['domain']})")
+
     def execute_funnel(self, funnel_id: str) -> List[Tuple[str, str, bool]]:
         """
         Execute a funnel by navigating through its steps.
