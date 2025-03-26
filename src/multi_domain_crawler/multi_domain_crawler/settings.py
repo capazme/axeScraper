@@ -87,7 +87,7 @@ RETRY_HTTP_CODES = [500, 502, 503, 504, 408, 429, 403]
 RETRY_PRIORITY_ADJUST = -1
 
 # ----- LOGGING -----
-LOG_LEVEL = 'INFO'  # Configurabile tramite CLI
+LOG_LEVEL = 'DEBUG'  # Configurabile tramite CLI
 LOG_FILE = None  # Configurabile tramite CLI
 
 # Formattazione dei log

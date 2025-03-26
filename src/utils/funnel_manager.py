@@ -96,7 +96,13 @@ class FunnelManager:
             options = webdriver.ChromeOptions()
             if headless:
                 options.add_argument("--headless")
-                
+            
+            options.add_experimental_option("prefs", {
+                "profile.default_content_setting_values.cookies": 1,  # Accetta cookie
+                "profile.block_third_party_cookies": False,
+                "profile.default_content_settings.popups": 0,
+                #"profile.managed_default_content_settings.images": 2  # Blocca immagini per velocizzare
+            })  
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-gpu")
@@ -368,6 +374,28 @@ class FunnelManager:
         # Initialize driver if not already
         self.initialize_driver(headless=self.config_manager.get_bool("AXE_HEADLESS", True))
         
+        # Memorizza i parametri di AB testing
+        ab_testing_params = {}
+        first_step_url = None
+        
+        # Trova l'URL del primo step per estrarre i parametri
+        if funnel.get("steps") and funnel["steps"] and "url" in funnel["steps"][0]:
+            first_step_url = funnel["steps"][0]["url"]
+            
+        if first_step_url and "ab-testing" in first_step_url:
+            # Estrai i parametri dalla URL iniziale
+            import urllib.parse
+            self.logger.info(f"Analizzando parametri AB testing dalla URL: {first_step_url}")
+            parsed_url = urllib.parse.urlparse(first_step_url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            if "code" in query_params:
+                ab_testing_params["code"] = query_params["code"][0]
+            if "version" in query_params:
+                ab_testing_params["version"] = query_params["version"][0]
+            self.logger.info(f"Rilevati parametri AB testing: {ab_testing_params}")
+        else:
+            self.logger.info("Nessun parametro AB testing rilevato nell'URL iniziale")
+
         # Handle authentication if required
         if funnel.get("auth_required", False) and self.auth_manager:
             self.logger.info(f"Funnel {funnel_id} requires authentication")
@@ -400,56 +428,123 @@ class FunnelManager:
             step_url = step.get("url", None)
             
             self.logger.info(f"Executing step {i+1}/{len(funnel.get('steps', []))}: {step_name}")
+            self.logger.info(f"Step URL originale: {step_url}")
             
             try:
                 # Navigate to URL if specified
                 if step_url:
-                    self.logger.debug(f"Navigating to {step_url}")
+                    # Aggiungi parametri AB testing se necessario
+                    if ab_testing_params and "ab-testing" not in step_url:
+                        params = "&".join([f"{k}={v}" for k, v in ab_testing_params.items()])
+                        if "?" in step_url:
+                            step_url = f"{step_url}&{params}"
+                        else:
+                            step_url = f"{step_url}?{params}"
+                        self.logger.info(f"URL modificato con parametri AB testing: {step_url}")
+                    self.logger.info(f"Navigando a {step_url}")
                     self.driver.get(step_url)
+                    
+                    # Dopo il caricamento, controlla l'URL effettivo
+                    actual_url = self.driver.current_url
+                    self.logger.info(f"URL effettivamente caricato: {actual_url}")
+                    
+                    # Imposta cookie AB testing solo nel primo step (i == 0)
+                    if i == 0 and "ab-testing" in step_url:
+                        self.logger.info("Impostazione manuale dei cookie di AB testing")
+                        
+                        # Prova con entrambi i formati di dominio per essere sicuri
+                        domains_to_try = ["locautorent.com", ".locautorent.com", "www.locautorent.com"]
+                        
+                        for domain in domains_to_try:
+                            try:
+                                self.logger.info(f"Tentativo con dominio cookie: {domain}")
+                                self.driver.add_cookie({
+                                    "name": "ab_testing_version", 
+                                    "value": "v1",
+                                    "domain": domain
+                                })
+                                self.driver.add_cookie({
+                                    "name": "ab_testing_code", 
+                                    "value": "9N0C47hqP2o5HTU4QhPx0K1b",
+                                    "domain": domain
+                                })
+                                self.logger.info(f"Cookie impostati con successo per dominio: {domain}")
+                            except Exception as e:
+                                self.logger.warning(f"Errore impostando cookie per dominio {domain}: {e}")
+                        
+                        # Ricarica la pagina per applicare i cookie
+                        self.logger.info("Ricaricando la pagina per applicare i cookie")
+                        self.driver.refresh()
+                        
+                        # Verifica l'URL dopo il refresh
+                        post_refresh_url = self.driver.current_url
+                        self.logger.info(f"URL dopo refresh: {post_refresh_url}")
+                        
+                        # Controlla se ci sono cookie impostati
+                        all_cookies = self.driver.get_cookies()
+                        self.logger.info(f"Cookie presenti dopo refresh: {len(all_cookies)}")
+                        for cookie in all_cookies:
+                            self.logger.info(f"Cookie: {cookie['name']} = {cookie['value']} (domain: {cookie['domain']})")
                 
                 # Wait for a specific element if needed
                 wait_selector = step.get("wait_for_selector", None)
                 if wait_selector:
-                    self.logger.debug(f"Waiting for selector: {wait_selector}")
+                    self.logger.info(f"Attesa elemento con selettore: {wait_selector}")
                     try:
                         WebDriverWait(self.driver, 30).until(
                             EC.visibility_of_element_located((By.CSS_SELECTOR, wait_selector))
                         )
+                        self.logger.info(f"Elemento trovato: {wait_selector}")
                     except TimeoutException:
-                        self.logger.warning(f"Timeout waiting for element: {wait_selector}")
+                        self.logger.warning(f"Timeout attesa elemento: {wait_selector}")
                 
                 # Take screenshot at step start
                 if self.output_manager:
-                    self.save_screenshot(
+                    screenshot_path = self.save_screenshot(
                         f"step_{i+1}_start.png",
                         subdirectory=f"funnels/{funnel_id}"
                     )
+                    self.logger.info(f"Screenshot iniziale salvato: {screenshot_path}")
 
                 # Execute actions
                 for j, action in enumerate(step.get("actions", [])):
+                    action_type = action.get("type", "unknown")
+                    self.logger.info(f"Esecuzione azione {j+1} di tipo '{action_type}'")
                     if not self.perform_action(action):
-                        self.logger.warning(f"Action {j+1} failed in step {step_name}")
+                        self.logger.warning(f"Azione {j+1} ({action_type}) fallita nello step {step_name}")
+                    else:
+                        self.logger.info(f"Azione {j+1} ({action_type}) completata con successo")
                     
                     # Small pause between actions
                     time.sleep(0.5)
                 
                 # Take screenshot after actions
                 if self.output_manager:
-                    self.save_screenshot(
+                    screenshot_path = self.save_screenshot(
                         f"step_{i+1}_end.png",
                         subdirectory=f"funnels/{funnel_id}"
                     )
+                    self.logger.info(f"Screenshot finale salvato: {screenshot_path}")
                 
                 # Check success condition
                 success_condition = step.get("success_condition", None)
-                success = True if not success_condition else self.check_success_condition(success_condition)
+                if success_condition:
+                    condition_type = success_condition.get("type", "unknown")
+                    self.logger.info(f"Verifica condizione di successo di tipo '{condition_type}'")
+                    success = self.check_success_condition(success_condition)
+                    self.logger.info(f"Condizione di successo: {'Soddisfatta' if success else 'Non soddisfatta'}")
+                else:
+                    success = True
+                    self.logger.info("Nessuna condizione di successo specificata, step considerato riuscito")
                 
                 # Record URL for accessibility analysis
                 current_url = self.driver.current_url
+                self.logger.info(f"URL finale step: {current_url}")
                 self.all_visited_urls.add(current_url)
                 
                 # Record result
                 results.append((step_name, current_url, success))
+                self.logger.info(f"Step {step_name} {'completato con successo' if success else 'fallito'}")
                 
                 # Save current page source for later analysis
                 if self.output_manager:
@@ -463,21 +558,23 @@ class FunnelManager:
                             page_source
                         )
                         if success:
-                            self.logger.info(f"Successfully saved page source: {page_source_path}")
+                            self.logger.info(f"Sorgente HTML salvato: {page_source_path}")
                     except Exception as e:
-                        self.logger.error(f"Error saving page source: {e}")
+                        self.logger.error(f"Errore nel salvataggio del sorgente HTML: {e}")
                 
                 # Check if we should continue
                 if not success:
-                    self.logger.warning(f"Step {step_name} failed, funnel execution stopped")
+                    self.logger.warning(f"Step {step_name} fallito, esecuzione funnel interrotta")
                     break
                     
                 # Wait before next step
                 step_timeout = step.get("timeout", 30)
+                self.logger.info(f"Pausa di 2 secondi prima del prossimo step")
                 time.sleep(2)  # Small pause between steps
                 
             except Exception as e:
-                self.logger.error(f"Error executing step {step_name}: {e}")
+                self.logger.error(f"Errore durante l'esecuzione dello step {step_name}: {e}")
+                self.logger.exception("Dettaglio errore:")
                 current_url = self.driver.current_url if self.driver else "unknown"
                 results.append((step_name, current_url, False))
                 break
@@ -494,13 +591,22 @@ class FunnelManager:
                 success = self.output_manager.safe_write_file(results_path, results_data)
                 
                 if success:
-                    self.logger.info(f"Successfully saved funnel results to: {results_path}")
+                    self.logger.info(f"Risultati funnel salvati in: {results_path}")
             except Exception as e:
-                self.logger.error(f"Error saving funnel results: {e}")
+                self.logger.error(f"Errore nel salvataggio dei risultati funnel: {e}")
         
         # Log results
         success_count = sum(1 for _, _, success in results if success)
-        self.logger.info(f"Funnel {funnel_id} completed: {success_count}/{len(results)} steps successful")
+        self.logger.info(f"Funnel {funnel_id} completato: {success_count}/{len(results)} step riusciti")
+        
+        # Driver cleanup
+        try:
+            all_cookies = self.driver.get_cookies()
+            self.logger.info(f"Stato finale dei cookie ({len(all_cookies)}):")
+            for cookie in all_cookies:
+                self.logger.info(f"  {cookie['name']} = {cookie['value']} (domain: {cookie['domain']})")
+        except Exception as e:
+            self.logger.warning(f"Impossibile ottenere i cookie finali: {e}")
         
         return results
     

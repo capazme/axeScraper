@@ -163,7 +163,7 @@ class ConfigurationManager:
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
+            self.logger.setLevel(logging.DEBUG)
             self.logger.propagate = False  # Prevent propagation
 
         

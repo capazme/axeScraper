@@ -273,7 +273,7 @@ class Pipeline:
                 "-s", f"OUTPUT_DIR={output_dir}",
                 "-s", f"CONCURRENT_REQUESTS={max_workers}",  # Usa il valore standardizzato
                 "-s", f"CONCURRENT_REQUESTS_PER_DOMAIN={max(8, max_workers // 2)}",
-                "-s", f"LOG_LEVEL=INFO",
+                "-s", f"LOG_LEVEL=DEBUG",
                 "-s", f"PIPELINE_REPORT_FORMAT=all",
                 "--logfile", f"{log_file}"
             ]

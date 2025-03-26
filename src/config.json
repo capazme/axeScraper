@@ -1,9 +1,9 @@
 {
   "BASE_URLS": [
-    "https://www.locautorent.com/"
+    "https://www.locautorent.com/it/ab-testing-enable-version/?code=9N0C47hqP2o5HTU4QhPx0K1b&version=v1"
   ],
   "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
-  "START_STAGE": "crawler",
+  "START_STAGE": "axe",
   "REPEAT_ANALYSIS": 1,
   
   "RESOURCE_MONITORING": true,
@@ -12,17 +12,17 @@
   "MEMORY_THRESHOLD": 80,
   "COOL_DOWN_TIME": 10,
   
-  "LOG_LEVEL": "INFO",
+  "LOG_LEVEL": "DEBUG",
   "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
   "LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
   "LOG_CONSOLE": true,
   "LOG_ROTATING": true,
   "LOG_MAX_BYTES": 10485760,
   "LOG_BACKUP_COUNT": 5,
-  "CRAWLER_LOG_LEVEL": "INFO",
-  "ANALYSIS_LOG_LEVEL": "INFO",
-  "REPORT_LOG_LEVEL": "INFO",
-  "PIPELINE_LOG_LEVEL": "INFO",
+  "CRAWLER_LOG_LEVEL": "DEBUG",
+  "ANALYSIS_LOG_LEVEL": "DEBUG",
+  "REPORT_LOG_LEVEL": "DEBUG",
+  "PIPELINE_LOG_LEVEL": "BEDUB",
   "AUTH_LOG_LEVEL": "DEBUG",
   "FUNNEL_LOG_LEVEL": "DEGUB",
   
@@ -75,7 +75,7 @@
         "https://www.locautorent.com/it/mylocauto/#/dashboard/rentals",
         "https://www.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
       ],
-      "explore_restricted_area": true
+      "explore_restricted_area": false
     }
   },
 
@@ -90,10 +90,10 @@
   "FUNNEL_ANALYSIS_ENABLED": true,
   
   "FUNNELS": {
-    "account_creation": {
-      "description": "Sign-up process from landing page to account creation",
+    "car_rent": {
+      "description": "Car rental funnel",
       "domain": "locautorent_com",
-      "auth_required": false,
+      "auth_required": true,
       "steps": [
         {
           "name": "LandingPage",
@@ -102,68 +102,97 @@
           "actions": [
             {"type": "cookie_banner"},
             {"type": "wait", "seconds": 2},
-            {"type": "screenshot", "filename": "landing_page.png"}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "selector": "#header > div.wrapper > div > div:nth-child(3) > a"
-          }
-        },
-        {
-          "name": "ClickLogin",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#header > div.wrapper > div > div:nth-child(3) > a"},
+            {"type": "screenshot", "filename": "landing_page.png"},
+            {"type": "click", "selector": "#form-field-pickup_date"},
             {"type": "wait", "seconds": 3},
-            {"type": "screenshot", "filename": "login_form.png"}
+            {"type": "screenshot", "filename": "open_form.png"}
           ],
           "success_condition": {
             "type": "element_visible",
-            "selector": "#app > div > div.MylocautoLoginModal.v--modal-overlay > div > div.v--modal-box.v--modal > div > div.CustomerCareForm.simpleVariant.loginInModal > h3"
+            "selector": "#form-field-pickup_date"
           }
         },
         {
-          "name": "ClickSignUp",
+          "name": "FormInput",
           "actions": [
             {"type": "cookie_banner"},
-            {"type": "click", "selector": "#app > div > div.MylocautoLoginModal.v--modal-overlay > div > div.v--modal-box.v--modal > div > div.CustomerCareForm.simpleVariant.loginInModal > form > div.subtitleinmodal > p > a"},
+            {"type": "input", "selector": "#form-field-pickup_pos_id", "value": "Napoli Aeroporto"},
             {"type": "wait", "seconds": 3},
-            {"type": "screenshot", "filename": "signup_form.png"}
-          ],
-          "success_condition": {
-            "type": "element_visible",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div"
-          }
-        },
-        {
-          "name": "FillSignupForm",
-          "actions": [
-            {"type": "cookie_banner"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(2) > div > div > input[type=text]", "value": "Test Name"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(3) > div > div > input[type=text]", "value": "Test Surname"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(4) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(5) > div > div > input[type=text]", "value": "roma.06@sapglegal.com"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(6) > div > div > input[type=password]", "value": "Securepassword123!"},
-            {"type": "input", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div:nth-child(7) > div > div > input[type=password]", "value": "Securepassword123!"},
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.checkboxsWrapper > div:nth-child(1) > label > i"},
-            {"type": "screenshot", "filename": "filled_form.png"}
+            {"type": "click", "selector": "#form-field-pickup_pos_id-listbox-item-0"},
+            {"type": "screenshot", "filename": "form_input.png"}
           ],
           "success_condition": {
             "type": "element_clickable",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.registerCtaWrapper > a"
+            "selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div.row.justify-content-between > div.col-auto.pt-xs.d-flex.align-items-start.column-gap-xs > div > button"
           }
         },
         {
-          "name": "SubmitForm",
+          "name": "ClickSearch",
           "actions": [
-            {"type": "cookie_banner"},
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > form > div.registerCtaWrapper > a"},
-            {"type": "wait", "seconds": 5},
-            {"type": "screenshot", "filename": "after_submit.png"}
+            {"type": "click", "selector": "#vue3-app-root-0-0 > div > div > div > div > form > div > div.main-wrapper.bg-color-blu-dark.expanded > div > div > div > div > div.row.justify-content-between > div.col-auto.pt-xs.d-flex.align-items-start.column-gap-xs > div > button"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "search_results.png"}
           ],
           "success_condition": {
             "type": "element_visible",
-            "text": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div > div > div > input[type=text]"
+            "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"
+          }
+        },
+        {
+          "name": "ChooseCar",
+          "wait_for_selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"},
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "car_details.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"
+          }
+        },
+        {
+          "name": "ChooseCoverage",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "after_submit_coverage.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"
+          }
+        },
+        {
+          "name": "ExtraOptions",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "after_submit_extra.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#vue3-app-root-1-0 > div > div > div > div.BookingEndCmp.container.pt-md > div > div.col-4 > div > div.CarRecapCardCmp.h-100"
+          }
+        },
+        {
+          "name": "Checkout",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "click", "selector": "#form-field-termsAndConditions"},
+            {"type": "wait", "seconds": 2},
+            {"type": "screenshot", "filename": "terms_click.png"},
+            {"type": "click", "selector": "#booking-end-complete-anchor-target > form > div > div:nth-child(8) > div > div > button"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "final_checkout.png"},
+            {"type": "wait", "seconds": 20}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "body > div.DialogCmp.d-flex.justify-content-center.align-items-center.DialogCarCardCmp.vfm.vfm--fixed.vfm--inset > div.vfm__content.vfm--outline-none > div"
           }
         }
       ]
