@@ -232,10 +232,7 @@ class FunnelManager:
                 cookie_script = """
                 try {
                     var cookieButtons = document.querySelectorAll(
-                        'button[id*="cookie"], button[class*="cookie"], ' +
-                        'button[id*="consent"], button[class*="consent"], ' +
-                        '#onetrust-accept-btn-handler, .cookie-banner .accept, ' +
-                        '.cookie-notice .accept'
+                        'button[id*="#onetrust-reject-all-handler"]'
                     );
                     for(var i=0; i<cookieButtons.length; i++) {
                         if(cookieButtons[i].offsetParent !== null) {

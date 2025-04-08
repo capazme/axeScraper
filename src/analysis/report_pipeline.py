@@ -322,7 +322,7 @@ if __name__ == "__main__":
     # Esempio 1: Pipeline con percorsi personalizzati all'inizializzazione
     pipeline = AccessibilityPipeline(
         output_dir="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output",
-        report_path="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/final_analysis_report_v1.xlsx",
+        report_path="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/final_analysis_report_restricted_page.xlsx",
         charts_dir="./home/ec2-user/axeScraper/output/locautorent_com/analysis_output/charts",
         temp_dir="./temp_files",
         logs_dir="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/logs"
@@ -330,8 +330,7 @@ if __name__ == "__main__":
     
     # Opzione 1: Eseguire la pipeline su file già generati
     results = pipeline.run(
-        axe_excel_path="/home/ec2-user/axeScraper/output/locautorent_com/axe_output/accessibility_report_locautorent_com.xlsx",
-        crawler_pickle_path="/home/ec2-user/axeScraper/output/locautorent_com/crawler_output/crawler_state_locautorent_com.pkl"
+        axe_excel_path="/home/ec2-user/axeScraper/output/locautorent_com_auth/analysis_output/accessibility_report_locautorent_com_auth_concat.xlsx"
     )
     
     print(f"Report generato in: {results['output_report']}")
