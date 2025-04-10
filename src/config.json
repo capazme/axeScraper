@@ -26,7 +26,7 @@
   "AUTH_LOG_LEVEL": "DEBUG",
   "FUNNEL_LOG_LEVEL": "DEGUB",
   
-  "EMAIL_RECIPIENT": "roma.01@sapglegal.com",
+  "EMAIL_RECIPIENT": "roma.01@example.com",
   "EMAIL_SUBJECT": "Accessibility Analysis Report",
   "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
   
@@ -46,8 +46,8 @@
   "AUTH_ENABLED": true,
   "AUTH_STRATEGY": "form",
   "AUTH_LOGIN_URL": "https://www.locautorent.com/it/mylocauto/#/auth/login",
-  "AUTH_USERNAME": "guglielmo.puzio00@gmail.com",
-  "AUTH_PASSWORD": "1407megu",
+  "AUTH_USERNAME": "...",
+  "AUTH_PASSWORD": "...",
   "AUTH_USERNAME_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.textInput > div > div > input[type=text]",
   "AUTH_PASSWORD_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.passwordInput > div > div > input[type=password]",
   "AUTH_SUBMIT_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > a",
