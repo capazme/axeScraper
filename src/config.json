@@ -46,8 +46,8 @@
   "AUTH_ENABLED": true,
   "AUTH_STRATEGIES": ["http_basic", "form"],  
   
-  "AUTH_BASIC_USERNAME": "username-http-basic",
-  "AUTH_BASIC_PASSWORD": "password-http-basic",
+  "AUTH_BASIC_USERNAME": "locautorent",
+  "AUTH_BASIC_PASSWORD": "4qgrH6zN76v485J",
   
   "AUTH_FORM_LOGIN_URL": "https://test.locautorent.com/it/mylocauto/#/auth/login",
   "AUTH_FORM_USERNAME": "ddwddrv@gmail.com",
@@ -59,19 +59,20 @@
   "AUTH_FORM_ERROR_INDICATOR": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a",
   
   "AUTH_PRE_LOGIN_ACTIONS": [
+    {"type": "screenshot", "filename": "pre_auth_start.png"},
     {"type": "wait", "seconds": 5},
-    {"type": "cookie_banner"},
-    {"type": "wait", "seconds": 5},
-    {"type": "click", "selector": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a"}
+    {"type": "screenshot", "filename": "pre_auth_end.png"}
   ],
   
   "AUTH_POST_LOGIN_ACTIONS": [
+    {"type": "screenshot", "filename": "post_auth_start.png"},
     {"type": "wait", "seconds": 5},
-    {"type": "screenshot", "filename": "post_login.png"}
+    {"type": "screenshot", "filename": "post_login.png"},
+    {"type": "screenshot", "filename": "post_auth_end.png"}
   ],
   
   "AUTH_DOMAINS": {
-    "locautorent_com": {
+    "test_locautorent_com": {
       "restricted_urls": [
         "https://www.test.locautorent.com/it/mylocauto/#/dashboard/profile",
         "https://www.test.locautorent.com/it/mylocauto/#/dashboard/account",
@@ -84,7 +85,6 @@
       "auth_strategy": "combined"
     }
   },
-
 
   "FUNNEL_ANALYSIS_ENABLED": true,
   
@@ -100,7 +100,7 @@
           "wait_for_selector": "#vue3-app-root-0-0",
           "actions": [
             {"type": "wait", "seconds": 5},
-            {"type": "screenshot", "filename": "landing_page.png"},
+            {"type": "screenshot", "filename": "landing_dashboard.png"},
             {"type": "cookie_banner"},
             {"type": "wait", "seconds": 5}
           ],

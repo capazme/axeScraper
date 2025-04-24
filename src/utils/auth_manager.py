@@ -3,11 +3,12 @@
 Authentication Manager for axeScraper
 
 Handles website authentication to enable accessibility testing of protected areas.
-Supports form-based authentication with cookie persistence for session management.
+Supports multiple authentication strategies including form-based and HTTP Basic.
 """
 
 import logging
 import time
+import base64
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -21,8 +22,8 @@ from utils.config_manager import ConfigurationManager
 
 class AuthenticationManager:
     """
-    Manager for website authentication using Selenium.
-    Supports form-based authentication and session management.
+    Manager for website authentication using multiple strategies.
+    Supports form-based authentication, HTTP Basic, and session management.
     """
     
     def __init__(
@@ -57,6 +58,11 @@ class AuthenticationManager:
         self.cookies = None
         self.authenticated_urls = []
         
+        # HTTP Basic credentials
+        self.http_basic_credentials = None
+        if "http_basic" in self.auth_config.get("strategies", []):
+            self._initialize_http_basic()
+        
         self.logger.info("Authentication Manager initialized")
     
     def _load_auth_config(self) -> Dict[str, Any]:
@@ -68,31 +74,59 @@ class AuthenticationManager:
         """
         auth_config = {
             "enabled": self.config_manager.get_bool("AUTH_ENABLED", False),
-            "strategy": self.config_manager.get("AUTH_STRATEGY", "form"),
-            "login_url": self.config_manager.get("AUTH_LOGIN_URL", ""),
-            "username": self.config_manager.get("AUTH_USERNAME", ""),
-            "password": self.config_manager.get("AUTH_PASSWORD", ""),
-            "username_selector": self.config_manager.get("AUTH_USERNAME_SELECTOR", ""),
-            "password_selector": self.config_manager.get("AUTH_PASSWORD_SELECTOR", ""),
-            "submit_selector": self.config_manager.get("AUTH_SUBMIT_SELECTOR", ""),
-            "success_indicator": self.config_manager.get("AUTH_SUCCESS_INDICATOR", ""),
-            "error_indicator": self.config_manager.get("AUTH_ERROR_INDICATOR", ""),
+            "strategies": self.config_manager.get_list("AUTH_STRATEGIES", ["form"]),
+            "login_url": self.config_manager.get("AUTH_FORM_LOGIN_URL", ""),
+            "username": self.config_manager.get("AUTH_FORM_USERNAME", ""),
+            "password": self.config_manager.get("AUTH_FORM_PASSWORD", ""),
+            "username_selector": self.config_manager.get("AUTH_FORM_USERNAME_SELECTOR", ""),
+            "password_selector": self.config_manager.get("AUTH_FORM_PASSWORD_SELECTOR", ""),
+            "submit_selector": self.config_manager.get("AUTH_FORM_SUBMIT_SELECTOR", ""),
+            "success_indicator": self.config_manager.get("AUTH_FORM_SUCCESS_INDICATOR", ""),
+            "error_indicator": self.config_manager.get("AUTH_FORM_ERROR_INDICATOR", ""),
             "pre_login_actions": self.config_manager.get("AUTH_PRE_LOGIN_ACTIONS", []),
             "post_login_actions": self.config_manager.get("AUTH_POST_LOGIN_ACTIONS", []),
-            "domains": self.config_manager.get("AUTH_DOMAINS", {})
+            "domains": self.config_manager.get("AUTH_DOMAINS", {}),
+            "http_basic_username": self.config_manager.get("AUTH_BASIC_USERNAME", ""),
+            "http_basic_password": self.config_manager.get("AUTH_BASIC_PASSWORD", "")
         }
         
-        # Validate required fields
+        # Log available strategies
+        self.logger.info(f"Authentication strategies: {auth_config['strategies']}")
+        
+        # Validate required fields for enabled strategies
         if auth_config["enabled"]:
             missing_fields = []
-            for field in ["login_url", "username", "password", "username_selector", "password_selector", "submit_selector"]:
-                if not auth_config[field]:
-                    missing_fields.append(field)
+            
+            # Validate form auth if enabled
+            if "form" in auth_config["strategies"]:
+                for field in ["login_url", "username", "password", "username_selector", "password_selector", "submit_selector"]:
+                    if not auth_config[field]:
+                        missing_fields.append(field)
+            
+            # Validate HTTP Basic auth if enabled
+            if "http_basic" in auth_config["strategies"]:
+                for field in ["http_basic_username", "http_basic_password"]:
+                    if not auth_config[field]:
+                        missing_fields.append(field)
             
             if missing_fields:
                 self.logger.warning(f"Missing required authentication fields: {', '.join(missing_fields)}")
         
         return auth_config
+    
+    def _initialize_http_basic(self) -> None:
+        """Initialize HTTP Basic authentication credentials."""
+        username = self.auth_config.get("http_basic_username", "")
+        password = self.auth_config.get("http_basic_password", "")
+        
+        if username and password:
+            # Create HTTP Basic auth header string
+            auth_string = f"{username}:{password}"
+            encoded_auth = base64.b64encode(auth_string.encode()).decode()
+            self.http_basic_credentials = f"Basic {encoded_auth}"
+            self.logger.info("HTTP Basic authentication credentials initialized")
+        else:
+            self.logger.warning("Missing HTTP Basic authentication credentials")
     
     def is_auth_required(self, url: str) -> bool:
         """
@@ -125,6 +159,38 @@ class AuthenticationManager:
                 
         return False
     
+    def get_auth_strategy_for_url(self, url: str) -> str:
+        """
+        Determine which authentication strategy to use for a URL.
+        
+        Args:
+            url: URL to check
+            
+        Returns:
+            Authentication strategy to use ('form', 'http_basic', or None)
+        """
+        if not self.auth_config["enabled"] or not self.is_auth_required(url):
+            return None
+            
+        # Check for domain-specific strategy
+        domain_slug = self.config_manager.domain_to_slug(self.domain) if self.domain else None
+        if domain_slug and domain_slug in self.auth_config["domains"]:
+            domain_strategy = self.auth_config["domains"][domain_slug].get("auth_strategy")
+            if domain_strategy:
+                if domain_strategy == "combined":
+                    # For combined strategy, use HTTP Basic for URLs with /api/ and form for others
+                    if "/api/" in url:
+                        return "http_basic"
+                    else:
+                        return "form"
+                return domain_strategy
+                
+        # Default to the first strategy in the list
+        if self.auth_config["strategies"]:
+            return self.auth_config["strategies"][0]
+            
+        return None
+    
     def initialize_driver(self, headless: bool = True) -> None:
         """
         Initialize Selenium webdriver for authentication.
@@ -147,6 +213,32 @@ class AuthenticationManager:
             options.add_argument("--disable-gpu")
             options.add_argument("--window-size=1920,1080")
             
+            # Add HTTP Basic authentication directly to Chrome if needed
+            if "http_basic" in self.auth_config["strategies"]:
+                username = self.auth_config.get("http_basic_username", "")
+                password = self.auth_config.get("http_basic_password", "")
+                if username and password:
+                    # Add command line switch for HTTP Basic auth
+                    if self.domain:
+                        # Extract the base domain for auth
+                        from urllib.parse import urlparse
+                        if self.domain.startswith(('http://', 'https://')):
+                            parsed = urlparse(self.domain)
+                            base_domain = parsed.netloc
+                        else:
+                            # Try to extract domain directly
+                            if '/' in self.domain:
+                                base_domain = self.domain.split('/', 1)[0]
+                            else:
+                                base_domain = self.domain
+                                
+                        # Remove www. if present
+                        if base_domain.startswith('www.'):
+                            base_domain = base_domain[4:]
+                            
+                        auth_switch = f'--host-resolver-rules="MAP * {base_domain}, EXCLUDE localhost"'
+                        options.add_argument(auth_switch)
+                    
             self.driver = webdriver.Chrome(options=options)
             self.driver.implicitly_wait(10)
             
@@ -235,7 +327,7 @@ class AuthenticationManager:
     
     def login(self) -> bool:
         """
-        Perform authentication to the website.
+        Perform authentication to the website using the appropriate strategy.
         
         Returns:
             True if authentication was successful
@@ -244,6 +336,33 @@ class AuthenticationManager:
             self.logger.info("Authentication is disabled")
             return False
             
+        # For HTTP Basic authentication, we don't need to perform login
+        # since credentials will be applied directly to each request
+        if self.auth_config["strategies"] == ["http_basic"]:
+            if self.http_basic_credentials:
+                self.logger.info("Using HTTP Basic authentication, no login needed")
+                self.is_authenticated = True
+                return True
+            else:
+                self.logger.error("HTTP Basic authentication credentials not set")
+                return False
+                
+        # If we have multiple strategies or just form authentication,
+        # proceed with form-based login
+        if "form" in self.auth_config["strategies"]:
+            return self._form_login()
+            
+        # No valid strategy found
+        self.logger.error("No valid authentication strategy found")
+        return False
+    
+    def _form_login(self) -> bool:
+        """
+        Perform form-based authentication.
+        
+        Returns:
+            True if authentication was successful
+        """
         if not self.auth_config["login_url"]:
             self.logger.error("Login URL not specified")
             return False
@@ -252,7 +371,7 @@ class AuthenticationManager:
             self.logger.info("Already authenticated")
             return True
             
-        self.logger.info(f"Performing authentication to {self.auth_config['login_url']}")
+        self.logger.info(f"Performing form authentication to {self.auth_config['login_url']}")
         
         try:
             # Initialize driver if not already
@@ -356,7 +475,7 @@ class AuthenticationManager:
     
     def apply_auth_to_driver(self, driver: webdriver.Chrome) -> bool:
         """
-        Apply authentication cookies to another Selenium driver.
+        Apply authentication to another Selenium driver.
         
         Args:
             driver: Selenium webdriver to apply authentication to
@@ -364,46 +483,107 @@ class AuthenticationManager:
         Returns:
             True if authentication was applied successfully
         """
-        if not self.is_authenticated or not self.cookies:
-            self.logger.warning("Cannot apply authentication - not authenticated or no cookies")
-            return False
-            
-        try:
-            # Get current URL to return to it after setting cookies
-            current_url = driver.current_url
-            
-            # Extract domain from login URL to set cookies
-            main_domain = self.auth_config["login_url"].split("//")[1].split("/")[0]
-            
-            # Need to visit the domain before setting cookies
-            driver.get(f"https://{main_domain}")
-            
-            # Add each cookie to the driver
-            for cookie in self.cookies:
-                try:
-                    # Remove problematic cookie attributes that might cause issues
-                    if 'expiry' in cookie:
-                        # Convert to int as required by Selenium
-                        cookie['expiry'] = int(cookie['expiry'])
+        # Determine what kind of authentication to apply
+        strategies = self.auth_config.get("strategies", ["form"])
+        
+        if "http_basic" in strategies and self.http_basic_credentials:
+            # For HTTP Basic, we need to add authentication script to the page
+            self.logger.info("Applying HTTP Basic authentication to driver")
+            try:
+                # Execute CDP command to set HTTP Basic auth
+                username = self.auth_config.get("http_basic_username", "")
+                password = self.auth_config.get("http_basic_password", "")
+                
+                if username and password:
+                    # Add authentication header via CDP
+                    network_conditions = {
+                        'offline': False,
+                        'latency': 0,
+                        'downloadThroughput': 0,
+                        'uploadThroughput': 0
+                    }
+                    driver.execute_cdp_cmd('Network.emulateNetworkConditions', network_conditions)
+                    driver.execute_cdp_cmd('Network.enable', {})
+                    driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                        'headers': {'Authorization': self.http_basic_credentials}
+                    })
                     
-                    # Remove attributes not supported by Selenium
-                    for attr in ['sameSite', 'priority', 'storeId', 'hostOnly']:
-                        if attr in cookie:
-                            del cookie[attr]
-                    
-                    driver.add_cookie(cookie)
-                except Exception as e:
-                    self.logger.warning(f"Error adding cookie: {e}")
+                    self.logger.info("HTTP Basic authentication applied to driver")
+                    return True
+            except Exception as e:
+                self.logger.error(f"Error applying HTTP Basic authentication: {e}")
+                return False
+                
+        # For form authentication, apply cookies
+        if "form" in strategies and self.is_authenticated and self.cookies:
+            self.logger.info("Applying form authentication cookies to driver")
+            try:
+                # Get current URL to return to it after setting cookies
+                current_url = driver.current_url
+                
+                # Extract domain from login URL to set cookies
+                main_domain = self.auth_config["login_url"].split("//")[1].split("/")[0]
+                
+                # Need to visit the domain before setting cookies
+                driver.get(f"https://{main_domain}")
+                
+                # Add each cookie to the driver
+                for cookie in self.cookies:
+                    try:
+                        # Remove problematic cookie attributes that might cause issues
+                        if 'expiry' in cookie:
+                            # Convert to int as required by Selenium
+                            cookie['expiry'] = int(cookie['expiry'])
+                        
+                        # Remove attributes not supported by Selenium
+                        for attr in ['sameSite', 'priority', 'storeId', 'hostOnly']:
+                            if attr in cookie:
+                                del cookie[attr]
+                        
+                        driver.add_cookie(cookie)
+                    except Exception as e:
+                        self.logger.warning(f"Error adding cookie: {e}")
+                
+                # Return to original URL
+                driver.get(current_url)
+                
+                self.logger.info(f"Authentication cookies applied to driver")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Error applying authentication to driver: {e}")
+                return False
+                
+        self.logger.warning("No authentication method available to apply to driver")
+        return False
+    
+    def apply_auth_to_request(self, url: str, headers: Dict[str, str] = None) -> Dict[str, str]:
+        """
+        Apply authentication to HTTP request headers.
+        
+        Args:
+            url: URL to authenticate for
+            headers: Existing headers to modify (or create new)
             
-            # Return to original URL
-            driver.get(current_url)
+        Returns:
+            Modified headers with authentication
+        """
+        if headers is None:
+            headers = {}
             
-            self.logger.info(f"Authentication cookies applied to driver")
-            return True
+        # Check if authentication is required for this URL
+        if not self.is_auth_required(url):
+            return headers
             
-        except Exception as e:
-            self.logger.error(f"Error applying authentication to driver: {e}")
-            return False
+        # Determine which auth strategy to use
+        strategy = self.get_auth_strategy_for_url(url)
+        
+        if strategy == "http_basic" and self.http_basic_credentials:
+            # Apply HTTP Basic auth header
+            headers['Authorization'] = self.http_basic_credentials
+            self.logger.debug(f"Applied HTTP Basic auth to request for {url}")
+        
+        return headers
     
     def collect_authenticated_urls(self, require_auth=True) -> List[str]:
         """

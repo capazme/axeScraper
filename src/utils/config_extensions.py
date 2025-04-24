@@ -117,15 +117,27 @@ def get_auth_config(config_manager) -> Dict[str, Any]:
     # Build from individual settings
     auth_config = {
         "enabled": config_manager.get_bool("AUTH_ENABLED", False),
-        "login_url": config_manager.get("AUTH_LOGIN_URL", ""),
-        "username_selector": config_manager.get("AUTH_USERNAME_SELECTOR", ""),
-        "password_selector": config_manager.get("AUTH_PASSWORD_SELECTOR", ""),
-        "submit_selector": config_manager.get("AUTH_SUBMIT_SELECTOR", ""),
-        "username": config_manager.get("AUTH_USERNAME", ""),
-        "password": config_manager.get("AUTH_PASSWORD", ""),
-        "login_success_selector": config_manager.get("AUTH_SUCCESS_SELECTOR", ""),
-        "login_success_url": config_manager.get("AUTH_SUCCESS_URL", ""),
-        "wait_time": config_manager.get_int("AUTH_WAIT_TIME", 10)
+        "strategies": config_manager.get_list("AUTH_STRATEGIES", ["form"]),
+        
+        # Form-based authentication
+        "login_url": config_manager.get("AUTH_FORM_LOGIN_URL", config_manager.get("AUTH_LOGIN_URL", "")),
+        "username": config_manager.get("AUTH_FORM_USERNAME", config_manager.get("AUTH_USERNAME", "")),
+        "password": config_manager.get("AUTH_FORM_PASSWORD", config_manager.get("AUTH_PASSWORD", "")),
+        "username_selector": config_manager.get("AUTH_FORM_USERNAME_SELECTOR", config_manager.get("AUTH_USERNAME_SELECTOR", "")),
+        "password_selector": config_manager.get("AUTH_FORM_PASSWORD_SELECTOR", config_manager.get("AUTH_PASSWORD_SELECTOR", "")),
+        "submit_selector": config_manager.get("AUTH_FORM_SUBMIT_SELECTOR", config_manager.get("AUTH_SUBMIT_SELECTOR", "")),
+        "success_indicator": config_manager.get("AUTH_FORM_SUCCESS_INDICATOR", config_manager.get("AUTH_SUCCESS_INDICATOR", "")),
+        "error_indicator": config_manager.get("AUTH_FORM_ERROR_INDICATOR", config_manager.get("AUTH_ERROR_INDICATOR", "")),
+        
+        # HTTP Basic authentication
+        "http_basic_username": config_manager.get("AUTH_BASIC_USERNAME", ""),
+        "http_basic_password": config_manager.get("AUTH_BASIC_PASSWORD", ""),
+        
+        # Common settings
+        "pre_login_actions": config_manager.get("AUTH_PRE_LOGIN_ACTIONS", []),
+        "post_login_actions": config_manager.get("AUTH_POST_LOGIN_ACTIONS", []),
+        "wait_time": config_manager.get_int("AUTH_WAIT_TIME", 10),
+        "domains": config_manager.get("AUTH_DOMAINS", {})
     }
     
     return auth_config

@@ -705,6 +705,19 @@ class Pipeline:
                 output_manager=output_manager
             )
             
+            # Log the configured auth strategies
+            auth_strategies = self.config_manager.get_list("AUTH_STRATEGIES", ["form"])
+            self.logger.info(f"Authentication strategies: {auth_strategies}")
+            
+            # Initialize HTTP Basic auth if needed
+            if "http_basic" in auth_strategies:
+                username = self.config_manager.get("AUTH_BASIC_USERNAME", "")
+                password = self.config_manager.get("AUTH_BASIC_PASSWORD", "")
+                if not username or not password:
+                    self.logger.warning("HTTP Basic authentication enabled but missing credentials")
+                else:
+                    self.logger.info("HTTP Basic authentication credentials found")
+            
             # Get restricted URLs directly from config without requiring authentication
             restricted_urls = self._get_restricted_urls(domain_slug)
             self.logger.info(f"Found {len(restricted_urls)} restricted URLs for {domain_slug}")
@@ -713,7 +726,7 @@ class Pipeline:
         except Exception as e:
             self.logger.exception(f"Error in authentication setup: {e}")
             return False, []
-    
+        
     def _get_restricted_urls(self, domain_slug: str) -> List[str]:
         """Get restricted URLs directly from config."""
         auth_domains = self.config_manager.get("AUTH_DOMAINS", {})
