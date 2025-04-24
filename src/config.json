@@ -74,12 +74,12 @@
   "AUTH_DOMAINS": {
     "test_locautorent_com": {
       "restricted_urls": [
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/profile",
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/account",
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/register-booking",
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/rentals",
-        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/profile",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/account",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/register-booking",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/rentals",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
       ],
       "explore_restricted_area": true,
       "auth_strategy": "combined"
