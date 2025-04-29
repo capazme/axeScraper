@@ -118,7 +118,7 @@ class AccessibilityPipeline:
     def run(
         self,
         axe_excel_path: str,
-        crawler_pickle_path: str,
+        crawler_pickle_path: Optional[str] = None,  # Made optional
         output_report_path: Optional[str] = None,
         charts_folder: Optional[str] = None
     ) -> Dict:
@@ -127,21 +127,22 @@ class AccessibilityPipeline:
         
         Args:
             axe_excel_path: Percorso del file Excel generato da AxeAnalysis
-            crawler_pickle_path: Percorso del file pickle generato da WebCrawler
+            crawler_pickle_path: Percorso opzionale del file pickle generato da WebCrawler
             output_report_path: Percorso dove salvare il report finale (sovrascrive self.report_path)
             charts_folder: Cartella dove salvare i grafici (sovrascrive self.charts_dir)
             
         Returns:
             Dizionario con i risultati della pipeline e i percorsi dei file generati
         """
-        self.logger.info(f"Avvio pipeline con Excel: {axe_excel_path}, Pickle: {crawler_pickle_path}")
+        self.logger.info(f"Avvio pipeline con Excel: {axe_excel_path}, Pickle: {crawler_pickle_path if crawler_pickle_path else 'Non fornito'}")
         
         # Validazione input
         if not os.path.exists(axe_excel_path):
             raise FileNotFoundError(f"File Excel non trovato: {axe_excel_path}")
         
-        if not os.path.exists(crawler_pickle_path):
-            raise FileNotFoundError(f"File pickle non trovato: {crawler_pickle_path}")
+        if crawler_pickle_path and not os.path.exists(crawler_pickle_path):
+            self.logger.warning(f"File pickle non trovato: {crawler_pickle_path}. L'analisi dei template sarà saltata.")
+            crawler_pickle_path = None
         
         # Configura percorsi di output per questa esecuzione
         if output_report_path is None:
@@ -159,180 +160,12 @@ class AccessibilityPipeline:
         axe_df_concat = self.analyzer.load_data(axe_excel_path_concat)
         self.logger.info(f"Caricati {len(axe_df_concat)} record di violazioni dall'Excel")
         
-        # Step 2: Carica i dati di template dal file pickle
-        self.logger.info("Caricamento dati di template dal file pickle...")
-        templates_df, state = self.analyzer.load_template_data(crawler_pickle_path)
-        self.logger.info(f"Caricati {len(templates_df)} template dal pickle")
+        # Step 2: Carica i dati di template dal file pickle (se fornito)
+        templates_df = None
+        if crawler_pickle_path:
+            self.logger.info("Caricamento dati di template dal file pickle...")
+            templates_df, state = self.analyzer.load_template_data(crawler_pickle_path)
+            self.logger.info(f"Caricati {len(templates_df)} template dal pickle")
+        else:
+            self.logger.info("Nessun file pickle fornito, l'analisi dei template verrà saltata.")
         
-        # Step 3: Analyzes the templates with the accessibility data
-        self.logger.info("Analisi dei template con i dati di accessibilità...")
-        template_analysis = self.analyzer.analyze_templates(templates_df, axe_df_concat)
-        self.logger.info(f"Completata analisi di template su {len(template_analysis)} template")
-        
-        # Step 4: Calculate metrics
-        self.logger.info("Calcolo metriche di accessibilità...")
-        metrics = self.analyzer.calculate_metrics(axe_df_concat)
-        
-        # Step 5: Create aggregations
-        self.logger.info("Creazione aggregazioni...")
-        aggregations = self.analyzer.create_aggregations(axe_df_concat)
-        
-        # Step 6: Create charts
-        self.logger.info("Generazione grafici...")
-        chart_files = self.analyzer.create_charts(metrics, aggregations, charts_folder)
-        
-        # Step 7: Generate comprehensive report
-        self.logger.info(f"Generazione report completo in {output_report_path}...")
-        self.analyzer.generate_report(
-            axe_df=axe_df_concat,
-            metrics=metrics,
-            aggregations=aggregations,
-            chart_files=chart_files,
-            template_df=template_analysis,
-            output_excel=output_report_path
-        )
-        
-        self.logger.info("Pipeline completata con successo!")
-        
-        # Ritorna i risultati e i percorsi dei file generati
-        return {
-            "metrics": metrics,
-            "aggregations": aggregations,
-            "template_analysis": template_analysis,
-            "output_report": str(output_report_path),
-            "charts": chart_files
-        }
-    
-    def analyze_from_crawl_and_scan(
-        self,
-        crawler_instance,  # WebCrawler instance
-        axe_instance,      # AxeAnalysis instance
-        output_report_path: Optional[str] = None,
-        charts_folder: Optional[str] = None,
-        perform_crawl: bool = False,
-        perform_scan: bool = False,
-        custom_crawler_state_path: Optional[str] = None,
-        custom_axe_excel_path: Optional[str] = None
-    ) -> Dict:
-        """
-        Esegue l'intera pipeline partendo dalle istanze di WebCrawler e AxeAnalysis.
-        Opzionalmente esegue anche il crawling e la scansione prima dell'analisi.
-        
-        Args:
-            crawler_instance: Istanza configurata di WebCrawler
-            axe_instance: Istanza configurata di AxeAnalysis
-            output_report_path: Percorso dove salvare il report finale (sovrascrive self.report_path)
-            charts_folder: Cartella dove salvare i grafici (sovrascrive self.charts_dir)
-            perform_crawl: Se True, esegue il crawling prima dell'analisi
-            perform_scan: Se True, esegue la scansione prima dell'analisi
-            custom_crawler_state_path: Percorso personalizzato per il file di stato del crawler
-            custom_axe_excel_path: Percorso personalizzato per il file Excel di Axe
-            
-        Returns:
-            Dizionario con i risultati della pipeline e i percorsi dei file generati
-        """
-        # Directory temporanea per i file intermedi
-        temp_dir = self.temp_dir
-        
-        # Configura percorsi di output
-        pickle_path = custom_crawler_state_path or crawler_instance.state_file
-        excel_path = custom_axe_excel_path or axe_instance.excel_filename
-        
-        # Se sono forniti percorsi personalizzati, aggiorna le istanze
-        if custom_crawler_state_path:
-            crawler_instance.state_file = custom_crawler_state_path
-            
-        if custom_axe_excel_path:
-            axe_instance.excel_filename = custom_axe_excel_path
-        
-        # Step 1: Esegui il crawling (opzionale)
-        if perform_crawl:
-            self.logger.info("Esecuzione del crawling web...")
-            # Usa asyncio.run per eseguire il metodo asincrono
-            import asyncio
-            asyncio.run(crawler_instance.run())
-            self.logger.info(f"Crawling completato. Stato salvato in {pickle_path}")
-        
-        # Step 2: Esegui la scansione di accessibilità (opzionale)
-        if perform_scan:
-            self.logger.info("Esecuzione della scansione di accessibilità...")
-            axe_instance.start()
-            self.logger.info(f"Scansione completata. Report salvato in {excel_path}")
-        
-        # Step 3: Esegui l'analisi completa
-        return self.run(
-            axe_excel_path=excel_path,
-            crawler_pickle_path=pickle_path,
-            output_report_path=output_report_path,
-            charts_folder=charts_folder
-        )
-        
-    def get_template_coverage_report(self, template_analysis_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Genera un report sulla copertura dei template analizzati.
-        
-        Args:
-            template_analysis_df: DataFrame risultante dall'analisi dei template
-            
-        Returns:
-            DataFrame con statistiche di copertura
-        """
-        if template_analysis_df.empty:
-            self.logger.warning("Nessun dato di template disponibile per il report di copertura")
-            return pd.DataFrame()
-        
-        # Calcola statistiche di copertura
-        total_pages = template_analysis_df['Page Count'].sum()
-        total_templates = len(template_analysis_df)
-        
-        # Calcola violazioni totali stimate
-        total_violations = template_analysis_df['Est. Total Violations'].sum()
-        critical_violations = template_analysis_df['Est. Critical'].sum()
-        serious_violations = template_analysis_df['Est. Serious'].sum()
-        
-        # Calcola la percentuale di pagine coperte dai template principali
-        top_templates = template_analysis_df.head(10)
-        top_coverage = top_templates['Page Count'].sum() / total_pages * 100 if total_pages > 0 else 0
-        
-        # Crea il DataFrame di report
-        coverage_data = {
-            'Metrica': [
-                'Numero totale template', 
-                'Numero totale pagine', 
-                'Violazioni totali stimate',
-                'Violazioni critiche stimate',
-                'Violazioni gravi stimate',
-                'Copertura top 10 template (%)'
-            ],
-            'Valore': [
-                total_templates,
-                total_pages,
-                total_violations,
-                critical_violations,
-                serious_violations,
-                round(top_coverage, 2)
-            ]
-        }
-        
-        return pd.DataFrame(coverage_data)
-
-
-# Esempio di utilizzo
-if __name__ == "__main__":
-    # Esempio 1: Pipeline con percorsi personalizzati all'inizializzazione
-    pipeline = AccessibilityPipeline(
-        output_dir="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output",
-        report_path="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/final_analysis_report_restricted_page.xlsx",
-        charts_dir="./home/ec2-user/axeScraper/output/locautorent_com/analysis_output/charts",
-        temp_dir="./temp_files",
-        logs_dir="/home/ec2-user/axeScraper/output/locautorent_com/analysis_output/logs"
-    )
-    
-    # Opzione 1: Eseguire la pipeline su file già generati
-    results = pipeline.run(
-        axe_excel_path="/home/ec2-user/axeScraper/output/locautorent_com_auth/analysis_output/accessibility_report_locautorent_com_auth_concat.xlsx"
-    )
-    
-    print(f"Report generato in: {results['output_report']}")
-    
-    

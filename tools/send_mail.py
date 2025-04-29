@@ -19,5 +19,5 @@ def send_email_report(excel_files, recipient_email=EMAIL_CONFIG["recipient_email
         
 if __name__ == "__main__":
     send_email_report([
-"/home/ec2-user/axeScraper/output/locautorent_com/charts/chart_funnel_violations.png",
+"/home/ec2-user/axeScraper/output/test_locautorent_com/analysis_output/final_analysis_test_locautorent_com.xlsx",
 ])

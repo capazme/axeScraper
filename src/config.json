@@ -60,14 +60,21 @@
   
   "AUTH_PRE_LOGIN_ACTIONS": [
     {"type": "screenshot", "filename": "pre_auth_start.png"},
+    {"type": "wait", "seconds": 10},
+    {"type": "click", "selector": "#onetrust-accept-btn-handler"},
+    {"type": "wait", "seconds": 10},
+    {"type": "screenshot", "filename": "post_cookie.png"},
     {"type": "wait", "seconds": 5},
     {"type": "screenshot", "filename": "pre_auth_end.png"}
   ],
   
   "AUTH_POST_LOGIN_ACTIONS": [
     {"type": "screenshot", "filename": "post_auth_start.png"},
+    {"type": "wait", "seconds": 7},
+    {"type":"click", "selector":"#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a"},
+    {"type": "wait", "seconds": 7},
+    {"type": "screenshot", "filename": "post_auth_click.png"},
     {"type": "wait", "seconds": 5},
-    {"type": "screenshot", "filename": "post_login.png"},
     {"type": "screenshot", "filename": "post_auth_end.png"}
   ],
   
@@ -79,7 +86,9 @@
         "https://test.locautorent.com/it/mylocauto/#/dashboard/register-booking",
         "https://test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
         "https://test.locautorent.com/it/mylocauto/#/dashboard/rentals",
-        "https://test.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto",
+        "https://test.locautorent.com/it/mylocauto/#/dashboard/change-password"
+
       ],
       "explore_restricted_area": true,
       "auth_strategy": "combined"
@@ -96,65 +105,72 @@
       "steps": [
         {
           "name": "Landing",
-          "url": "https://test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
-          "wait_for_selector": "#vue3-app-root-0-0",
+          "url": "https://test.locautorent.com/it/mylocauto/#/dashboard/my-locauto",
+          "wait_for_selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.mainContent.full.w-100 > div.MyLocauto > div.MyLocautoHero.loyalty-active > div.container > div > div > div.slider-wrapper > div > div > div.MyLocautoLevelSlide.carousel-cell.active > div > div.description-wrapper",
           "actions": [
-            {"type": "wait", "seconds": 5},
-            {"type": "screenshot", "filename": "landing_dashboard.png"},
-            {"type": "cookie_banner"},
-            {"type": "wait", "seconds": 5}
+        {"type": "click", "selector": "#onetrust-accept-btn-handler"},
+        {"type": "screenshot", "filename": "landing_dashboard_pre_click.png"},
+        {"type": "wait", "seconds": 5},
+        {"type": "click", "selector": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a"},
+        {"type": "wait", "seconds": 5},
+        {"type": "screenshot", "filename": "dashboard_loaded.png"}
           ],
           "success_condition": {
-            "type": "element_visible",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.NewTrips > div > div.tripCardsList > div > div > div.innerWrapper > div.ctaWrapper > a"
+        "type": "element_visible",
+        "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.MyLocauto > div.mainContent.mt-5.mt-md-0 > section > div.list > div > div > div.innerWrapper > div.ctaWrapper > a"
           }
         },
         {
           "name": "SelectSmartCheckin",
           "actions": [
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.NewTrips > div > div.tripCardsList > div > div > div.innerWrapper > div.ctaWrapper > a"},
-            {"type": "wait", "seconds": 5}
+        {"type":"wait", "seconds": 5},
+        {"type": "screenshot", "filename": "before_smartcheckin_click.png"},
+        {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.MyLocauto > div.mainContent.mt-5.mt-md-0 > section > div.list > div > div > div.innerWrapper > div.ctaWrapper > a"},
+        {"type": "wait", "seconds": 5},
+        {"type": "screenshot", "filename": "after_smartcheckin_click.png"}
           ],
           "success_condition": {
-            "type": "element_visible",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+        "type": "element_visible",
+        "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.stepContent.step2 > a"
           }
         },
         {
           "name": "TermsCheckout",
           "actions": [
-            {"type": "cookie_banner"},
-            {"type": "wait", "seconds": 2},
-            {"type": "script", "code": "const checkbox = document.getElementById('form-field-termsAndConditions'); const label = document.querySelector('#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > div.subtitle.left > div.checkboxes > div > label'); if (checkbox) { checkbox.checked = true; checkbox.setAttribute('checked', 'checked'); } if (label) { label.setAttribute('aria-checked', 'true'); } const event = new Event('change', {bubbles: true, cancelable: true}); checkbox.dispatchEvent(event); const formInput = checkbox.closest('.FormInputCheckCmp'); if (formInput && formInput.__vue__) { try { formInput.__vue__.$emit('change', true); formInput.__vue__.$emit('input', true); } catch(e) {} }"},
-            {"type": "screenshot", "filename": "terms_click.png"}
+        {"type": "wait", "seconds": 5},
+        {"type": "screenshot", "filename": "before_terms_acceptance.png"},
+        {"type": "script", "code": "const checkbox = document.getElementById('form-field-termsAndConditions'); const label = document.querySelector('#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > div.subtitle.left > div.checkboxes > div > label'); if (checkbox) { checkbox.checked = true; checkbox.setAttribute('checked', 'checked'); } if (label) { label.setAttribute('aria-checked', 'true'); } const event = new Event('change', {bubbles: true, cancelable: true}); checkbox.dispatchEvent(event); const formInput = checkbox.closest('.FormInputCheckCmp'); if (formInput && formInput.__vue__) { try { formInput.__vue__.$emit('change', true); formInput.__vue__.$emit('input', true); } catch(e) {} }"},
+        {"type": "screenshot", "filename": "after_terms_acceptance.png"}
           ],
           "success_condition": {
-            "type": "element_clickable",
-            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+        "type": "element_clickable",
+        "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
           }
         },
         {
           "name": "Clickproceed1",
           "actions": [
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
-            {"type": "wait", "seconds": 10},
-            {"type": "screenshot", "filename": "search_results.png"}
+        {"type": "screenshot", "filename": "before_proceed1.png"},
+        {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
+        {"type": "wait", "seconds": 10},
+        {"type": "screenshot", "filename": "after_proceed1.png"}
           ],
           "success_condition": {
-            "type": "element_visible",
-            "text": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+        "type": "element_visible",
+        "text": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
           }
         },
         {
           "name": "Clickproceed2",
           "actions": [
-            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
-            {"type": "wait", "seconds": 10},
-            {"type": "screenshot", "filename": "results2.png"}
+        {"type": "screenshot", "filename": "before_proceed2.png"},
+        {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
+        {"type": "wait", "seconds": 10},
+        {"type": "screenshot", "filename": "after_proceed2.png"}
           ],
           "success_condition": {
-            "type": "element_visible",
-            "text": "#continue"
+        "type": "element_visible",
+        "text": "#continue"
           }
         }
       ]

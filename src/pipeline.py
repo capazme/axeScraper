@@ -110,6 +110,14 @@ class Pipeline:
         # Initialize auth and funnel managers
         self.auth_manager = None
         self.funnel_manager = None
+
+        # Inizializza un OutputManager generico per l'analyzer
+        base_dir = self.config_manager.get('OUTPUT_BASE_DIR', 'output')
+        domain = self.config_manager.get('DOMAIN', 'generic')
+        generic_output_manager = OutputManager(base_dir, domain)
+        self.analyzer = AccessibilityAnalyzer(output_manager=generic_output_manager)
+
+        self.logger.info("Pipeline __init__ completato.")
             
     def _handle_shutdown(self, signum, _):
         """Gestisce i segnali di interruzione con pulizia ordinata."""
@@ -564,130 +572,131 @@ class Pipeline:
             self.logger.exception(f"Errore in analisi Axe: {e}")
             return False
     
-    async def run_report_analysis(self, base_url: str, domain_config: Dict[str, Any], 
-                          output_manager: OutputManager, 
-                          funnel_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
-                          funnel_violations_df: Optional[pd.DataFrame] = None) -> Optional[str]:
-        """
-        Generates the final report of accessibility with standardized path management.
-        
-        Args:
-            base_url: Target URL
-            domain_config: Domain-specific configuration
-            output_manager: Output manager instance
-            funnel_metadata: Optional metadata about funnels
-            funnel_violations_df: Optional DataFrame with funnel HTML analysis results
-            
-        Returns:
-            Path to the generated report or None
-        """
-        self.logger.info(f"Generating final report for {base_url}")
-        
-        # Ensure funnel_metadata is a dictionary, not None
-        funnel_metadata = funnel_metadata or {}
-        
-        # Get standardized paths
-        input_excel = str(output_manager.get_path(
-            "axe", f"accessibility_report_{output_manager.domain_slug}.xlsx"))
-        concat_excel = str(output_manager.get_path(
-            "analysis", f"accessibility_report_{output_manager.domain_slug}_concat.xlsx"))
-        output_excel = str(output_manager.get_path(
-            "analysis", f"final_analysis_{output_manager.domain_slug}.xlsx"))
-        crawler_state = str(output_manager.get_path(
-            "crawler", f"crawler_state_{output_manager.domain_slug}.pkl"))
-        charts_dir = str(output_manager.get_path("charts"))
-        
-        # Add funnel metadata to Excel file
-        if funnel_metadata:
-            self.logger.info(f"Adding funnel metadata to Excel for {len(funnel_metadata)} URLs")
-            self._add_funnel_metadata_to_axe_results(input_excel, funnel_metadata)
-        
-        try:
-            # STEP 1: Concatenate sheets from main Excel file
-            from utils.concat import concat_excel_sheets
-            self.logger.info(f"Concatenating sheets from {input_excel}")
-            concat_excel_path = concat_excel_sheets(file_path=input_excel, output_path=concat_excel)
-            self.logger.info(f"Sheets concatenated and saved to {concat_excel_path}")
-            
-            # STEP 2: Load main analysis data
-            analyzer = AccessibilityAnalyzer(output_manager=output_manager)
-            
-            # Set funnel metadata if provided
-            if funnel_metadata:
-                analyzer.funnel_metadata = funnel_metadata
-                self.logger.info(f"Added funnel metadata for {len(funnel_metadata)} URLs")
-            
-            # Load and process the data
-            self.logger.info(f"Loading accessibility data for {base_url}")
-            axe_df = analyzer.load_data(concat_excel_path, crawler_state)
-            
-            # STEP 3: Merge funnel HTML analysis results if available
-            if funnel_violations_df is not None and not funnel_violations_df.empty:
-                self.logger.info(f"Integrating {len(funnel_violations_df)} funnel violations into analysis")
-                
-                # Ensure common columns exist in both DataFrames
-                required_columns = ['violation_id', 'impact', 'page_url', 'description', 'help', 'target', 'html', 'failure_summary']
-                
-                # Verify all required columns exist in both DataFrames
-                missing_in_axe = [col for col in required_columns if col not in axe_df.columns]
-                missing_in_funnel = [col for col in required_columns if col not in funnel_violations_df.columns]
-                
-                if missing_in_axe or missing_in_funnel:
-                    self.logger.warning(f"Missing columns in DataFrames: axe_df: {missing_in_axe}, funnel_df: {missing_in_funnel}")
-                    self.logger.warning("Will only concatenate compatible columns")
-                    
-                    # Find common columns
-                    common_columns = [col for col in axe_df.columns if col in funnel_violations_df.columns]
-                    
-                    # Add missing columns to funnel_violations_df with None values
-                    for col in axe_df.columns:
-                        if col not in funnel_violations_df.columns:
-                            funnel_violations_df[col] = None
-                
-                # Concatenate DataFrames
-                axe_df = pd.concat([axe_df, funnel_violations_df], ignore_index=True)
-                self.logger.info(f"Combined DataFrame now has {len(axe_df)} rows")
-            
-            # Continue with analysis as before
-            self.logger.info(f"Calculating metrics for {base_url}")
-            metrics = analyzer.calculate_metrics(axe_df)
-            
-            self.logger.info(f"Creating data aggregations for {base_url}")
-            aggregations = analyzer.create_aggregations(axe_df)
-            
-            self.logger.info(f"Generating charts for {base_url}")
-            chart_files = analyzer.create_charts(metrics, aggregations, axe_df)
-            
-            # Load template data if available
-            template_df = None
-            if os.path.exists(crawler_state):
+    async def run_report_analysis(self, base_url: str, domain_config: Dict[str, Any],
+                                    output_manager: OutputManager,
+                                    funnel_metadata: Optional[Dict[str, Dict[str, Any]]] = None, # Non più usato direttamente dall'analyzer
+                                    funnel_violations_df: Optional[pd.DataFrame] = None) -> Optional[str]:
+            """
+            Genera il report di accessibilità finale, combinando i risultati di Axe
+            con l'analisi opzionale dei file HTML dei funnel.
+            Utilizza il metodo run_analysis dell'analyzer pre-istanziato.
+
+            Args:
+                base_url: URL target (usato per logging/contesto).
+                domain_config: Configurazione specifica del dominio (potrebbe non essere più necessaria qui).
+                output_manager: Gestore dell'output (usato per determinare i percorsi di input/output).
+                funnel_metadata: Metadati sui funnel (attualmente non usati direttamente qui).
+                funnel_violations_df: DataFrame opzionale con i risultati dell'analisi dei file HTML dei funnel.
+
+            Returns:
+                Percorso del report finale generato o None in caso di errore.
+            """
+            self.logger.info(f"Avvio generazione report analisi per {base_url}...")
+
+            # --- Determina Percorsi Input ---
+            # L'analyzer.run_analysis troverà questi di default tramite output_manager,
+            # ma li otteniamo qui per poter combinare i dati prima, se necessario.
+            axe_report_path = output_manager.get_path("axe", f"accessibility_report_{output_manager.domain_slug}.xlsx")
+            # Dai priorità al file _concat se esiste
+            concat_report_path_default = output_manager.get_path("analysis", f"accessibility_report_{output_manager.domain_slug}_concat.xlsx")
+            if concat_report_path_default.exists():
+                path_to_load = concat_report_path_default
+                self.logger.info(f"Trovato file concatenato pre-esistente: {path_to_load}")
+            elif axe_report_path.exists():
+                # Se il concat non esiste, concatena quello base
+                self.logger.info(f"File concatenato non trovato, concateno fogli da: {axe_report_path}")
                 try:
-                    self.logger.info(f"Loading template structure data for {base_url}")
-                    templates_df, state = analyzer.load_template_data(crawler_state)
-                    template_df = analyzer.analyze_templates(templates_df, axe_df)
-                except Exception as e:
-                    self.logger.warning(f"Template analysis failed (non-critical): {e}")
-            
-            # Generate final report
-            self.logger.info(f"Creating final Excel report for {base_url}")
-            report_path = analyzer.generate_report(
-                axe_df=axe_df,
-                metrics=metrics,
-                aggregations=aggregations,
-                chart_files=chart_files,
-                template_df=template_df,
-                output_excel=output_excel
-            )
-            
-            self.logger.info(f"Final report generated: {report_path}")
-            return report_path
-            
-        except Exception as e:
-            self.logger.exception(f"Error generating final report: {e}")
-            return None   
-        
+                    from utils.concat import concat_excel_sheets # Assicurati che sia importato
+                    # Salva il file concatenato temporaneo o nell'area analysis
+                    concat_output_path = output_manager.get_path("analysis", f"temp_{output_manager.domain_slug}_concat.xlsx")
+                    path_to_load = Path(concat_excel_sheets(file_path=str(axe_report_path), output_path=str(concat_output_path)))
+                    self.logger.info(f"Fogli concatenati in: {path_to_load}")
+                except Exception as concat_err:
+                    self.logger.error(f"Errore durante la concatenazione dei fogli da {axe_report_path}: {concat_err}. Tento di usare il file originale.")
+                    path_to_load = axe_report_path # Fallback al file originale
+            else:
+                self.logger.error(f"Nessun file Excel di input Axe trovato ({concat_report_path_default} o {axe_report_path}). Impossibile generare il report.")
+                return None
+
+            # Percorso opzionale del file PKL del crawler
+            crawler_state_path = output_manager.get_path("crawler", f"crawler_state_{output_manager.domain_slug}.pkl")
+            crawler_state_input = str(crawler_state_path) if crawler_state_path.exists() else None
+            if not crawler_state_input:
+                self.logger.warning(f"File di stato Crawler non trovato ({crawler_state_path}). L'analisi dei template sarà limitata.")
+
+
+            # --- Combina Dati Funnel HTML (se presenti) ---
+            final_input_excel_path = str(path_to_load) # Default: usa il file (concatenato) trovato
+
+            if funnel_violations_df is not None and not funnel_violations_df.empty:
+                self.logger.info(f"Combinazione dei risultati Axe ({path_to_load}) con {len(funnel_violations_df)} violazioni da analisi funnel HTML...")
+                try:
+                    # Carica il DataFrame principale (dal file concatenato)
+                    # Assumendo che i dati siano nel primo foglio dopo la concatenazione
+                    main_axe_df = pd.read_excel(path_to_load, sheet_name=0)
+
+                    # Assicura che le colonne necessarie per il concat esistano in entrambi
+                    # (AccessibilityAnalyzer si aspetta queste colonne base)
+                    required_cols = ['violation_id', 'impact', 'page_url', 'description', 'help', 'html']
+                    common_cols = [col for col in main_axe_df.columns if col in funnel_violations_df.columns]
+                    combined_df_list = [main_axe_df]
+
+                    # Verifica compatibilità colonne
+                    if all(col in funnel_violations_df.columns for col in required_cols):
+                        # Seleziona colonne comuni + quelle specifiche del funnel per mantenere l'informazione
+                        funnel_cols_to_keep = common_cols + ['funnel_name', 'funnel_step', 'step_number', 'has_funnel_data']
+                        funnel_violations_df_filtered = funnel_violations_df[[col for col in funnel_cols_to_keep if col in funnel_violations_df.columns]].copy()
+                        combined_df_list.append(funnel_violations_df_filtered)
+                    else:
+                        self.logger.warning("Il DataFrame delle violazioni funnel HTML non ha tutte le colonne richieste. Sarà ignorato.")
+
+                    # Concatena se ci sono dati funnel validi
+                    if len(combined_df_list) > 1:
+                        combined_df = pd.concat(combined_df_list, ignore_index=True, sort=False)
+                        self.logger.info(f"DataFrame combinato creato con {len(combined_df)} righe.")
+
+                        # Salva il DataFrame combinato in un nuovo file Excel temporaneo
+                        temp_combined_excel = output_manager.get_path("analysis", f"temp_{output_manager.domain_slug}_combined_input.xlsx")
+                        with pd.ExcelWriter(temp_combined_excel) as writer:
+                            combined_df.to_excel(writer, index=False, sheet_name="CombinedData")
+                        self.logger.info(f"Dati combinati salvati in file temporaneo: {temp_combined_excel}")
+                        final_input_excel_path = str(temp_combined_excel) # Usa questo file per l'analisi
+                    else:
+                        self.logger.info("Nessun dato funnel valido da combinare.")
+
+                except Exception as merge_err:
+                    self.logger.error(f"Errore durante la combinazione dei dati Axe e Funnel HTML: {merge_err}. Si procederà solo con i dati Axe principali.")
+                    # Usa ancora path_to_load (il file Axe originale/concatenato)
+
+
+            # --- Esegui l'Analisi Completa usando l'Analyzer ---
+            self.logger.info(f"Avvio analisi completa usando l'istanza di AccessibilityAnalyzer...")
+            try:
+                # Usa l'istanza analyzer creata in __init__
+                # Esegui in un thread separato perché run_analysis è sincrona
+                report_path = await asyncio.to_thread(
+                    self.analyzer.run_analysis,
+                    input_excel=final_input_excel_path, # Usa il file combinato (o originale se fallito/non necessario)
+                    crawler_state=crawler_state_input  # Passa il percorso del pkl (o None)
+                )
+
+                if report_path:
+                    self.logger.info(f"Analisi e generazione report completate con successo: {report_path}")
+                    return report_path
+                else:
+                    self.logger.error("Il metodo run_analysis dell'analyzer non ha restituito un percorso valido.")
+                    return None
+
+            except Exception as e:
+                self.logger.exception(f"Errore durante l'esecuzione di AccessibilityAnalyzer.run_analysis: {e}")
+                return None
+
+        # Rimuovi il metodo helper _add_funnel_metadata_to_axe_results se non più necessario
+        # def _add_funnel_metadata_to_axe_results(self, ...):
+        #    pass
+      
     async def run_authentication(self, base_url: str, domain_config: Dict[str, Any], output_manager: OutputManager) -> Tuple[bool, List[str]]:
-        """Initialize authentication and collect restricted URLs without forcing login."""
+        """Initialize authentication and collect restricted URLs."""
         self.logger.info(f"Initializing authentication for {base_url}")
         
         if not self.config_manager.get_bool("AUTH_ENABLED", False):
@@ -699,24 +708,17 @@ class Pipeline:
             domain_slug = self.config_manager.domain_to_slug(base_url)
             self.logger.info(f"Domain slug for auth: {domain_slug} (from {base_url})")
             
+            # Ensure we're passing the correct configuration for both auth methods
+            auth_strategies = self.config_manager.get_list("AUTH_STRATEGIES", ["form"])
+            
+            # Log which strategies we're using
+            self.logger.info(f"Using authentication strategies: {auth_strategies}")
+            
             self.auth_manager = AuthenticationManager(
                 config_manager=self.config_manager,
                 domain=base_url,
                 output_manager=output_manager
             )
-            
-            # Log the configured auth strategies
-            auth_strategies = self.config_manager.get_list("AUTH_STRATEGIES", ["form"])
-            self.logger.info(f"Authentication strategies: {auth_strategies}")
-            
-            # Initialize HTTP Basic auth if needed
-            if "http_basic" in auth_strategies:
-                username = self.config_manager.get("AUTH_BASIC_USERNAME", "")
-                password = self.config_manager.get("AUTH_BASIC_PASSWORD", "")
-                if not username or not password:
-                    self.logger.warning("HTTP Basic authentication enabled but missing credentials")
-                else:
-                    self.logger.info("HTTP Basic authentication credentials found")
             
             # Get restricted URLs directly from config without requiring authentication
             restricted_urls = self._get_restricted_urls(domain_slug)
@@ -726,7 +728,7 @@ class Pipeline:
         except Exception as e:
             self.logger.exception(f"Error in authentication setup: {e}")
             return False, []
-        
+      
     def _get_restricted_urls(self, domain_slug: str) -> List[str]:
         """Get restricted URLs directly from config."""
         auth_domains = self.config_manager.get("AUTH_DOMAINS", {})

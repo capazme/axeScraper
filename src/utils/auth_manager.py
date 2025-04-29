@@ -325,9 +325,82 @@ class AuthenticationManager:
             self.logger.error(f"Error performing action: {e}")
             return False
     
+    def perform_http_basic_auth(self) -> bool:
+        """
+        Perform HTTP Basic Authentication.
+        
+        Returns:
+            True if authentication was successful
+        """
+        if not self.auth_config.get("strategies", []):
+            return False
+
+        if "http_basic" not in self.auth_config.get("strategies", []):
+            self.logger.info("HTTP Basic Authentication not enabled")
+            return True  # Not an error, just skipping
+            
+        username = self.auth_config.get("http_basic_username", "")
+        password = self.auth_config.get("http_basic_password", "")
+        
+        if not username or not password:
+            self.logger.error("HTTP Basic Authentication credentials not provided")
+            return False
+        
+        self.logger.info("Performing HTTP Basic Authentication")
+        
+        # Initialize driver if needed
+        if not self.driver:
+            self.initialize_driver()
+        
+        try:
+            # Format base URL with HTTP Basic Auth credentials
+            base_url = self.auth_config.get("base_url", "")
+            if not base_url:
+                # Try to extract base URL from login URL
+                login_url = self.auth_config.get("login_url", "")
+                if login_url:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(login_url)
+                    base_url = f"{parsed.scheme}://{parsed.netloc}"
+            
+            if not base_url:
+                self.logger.error("No base URL available for HTTP Basic Auth")
+                return False
+                
+            # Construct URL with credentials
+            from urllib.parse import urlparse, urlunparse
+            parsed_url = urlparse(base_url)
+            auth_url = urlunparse((
+                parsed_url.scheme,
+                f"{username}:{password}@{parsed_url.netloc}",
+                parsed_url.path,
+                parsed_url.params,
+                parsed_url.query,
+                parsed_url.fragment
+            ))
+            
+            self.logger.info(f"Navigating to base URL with HTTP Basic Auth")
+            self.driver.get(auth_url)
+            
+            # Wait for the page to load
+            time.sleep(5)
+            
+            # Check if authentication was successful (no auth dialog)
+            # This is hard to detect directly, so we'll check for signs of successful loading
+            if "401 Unauthorized" in self.driver.page_source or "Authentication Required" in self.driver.page_source:
+                self.logger.error("HTTP Basic Authentication failed - 401 response detected")
+                return False
+                
+            self.logger.info("HTTP Basic Authentication successful")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error during HTTP Basic Authentication: {e}")
+            return False
+
     def login(self) -> bool:
         """
-        Perform authentication to the website using the appropriate strategy.
+        Perform all configured authentication steps in sequence.
         
         Returns:
             True if authentication was successful
@@ -336,25 +409,140 @@ class AuthenticationManager:
             self.logger.info("Authentication is disabled")
             return False
             
-        # For HTTP Basic authentication, we don't need to perform login
-        # since credentials will be applied directly to each request
-        if self.auth_config["strategies"] == ["http_basic"]:
-            if self.http_basic_credentials:
-                self.logger.info("Using HTTP Basic authentication, no login needed")
-                self.is_authenticated = True
-                return True
-            else:
-                self.logger.error("HTTP Basic authentication credentials not set")
-                return False
-                
-        # If we have multiple strategies or just form authentication,
-        # proceed with form-based login
-        if "form" in self.auth_config["strategies"]:
-            return self._form_login()
+        if self.is_authenticated:
+            self.logger.info("Already authenticated")
+            return True
             
-        # No valid strategy found
-        self.logger.error("No valid authentication strategy found")
+        self.logger.info("Starting authentication sequence")
+        
+        # Initialize driver if not already
+        self.initialize_driver(headless=self.config_manager.get_bool("AXE_HEADLESS", True))
+        
+        # 1. First perform HTTP Basic Auth if enabled
+        basic_auth_success = self.perform_http_basic_auth()
+        if not basic_auth_success and "http_basic" in self.auth_config.get("strategies", []):
+            self.logger.error("HTTP Basic Authentication failed, aborting authentication sequence")
+            return False
+        
+        # 2. Proceed with form authentication if enabled
+        if "form" in self.auth_config.get("strategies", []) and self.auth_config.get("login_url"):
+            return self._perform_form_auth()
+        elif basic_auth_success:
+            # If only HTTP Basic Auth was needed and it succeeded
+            self.is_authenticated = True
+            return True
+        
         return False
+
+    def _perform_form_auth(self) -> bool:
+        """
+        Perform form-based authentication.
+        
+        Returns:
+            True if authentication was successful
+        """
+        if not self.auth_config.get("login_url"):
+            self.logger.error("Login URL not specified for form authentication")
+            return False
+            
+        self.logger.info(f"Performing form authentication to {self.auth_config['login_url']}")
+        
+        try:
+            # Navigate to login page
+            self.driver.get(self.auth_config["login_url"])
+            
+            # Take screenshot of login page
+            if self.output_manager:
+                screenshot_path = self.output_manager.get_path("screenshots", "auth_login_page.png")
+                self.output_manager.ensure_path_exists("screenshots")
+                self.driver.save_screenshot(str(screenshot_path))
+            
+            # Perform pre-login actions
+            for action in self.auth_config["pre_login_actions"]:
+                self.perform_action(action)
+            
+            # Fill username
+            if self.auth_config.get("username_selector"):
+                username_field = WebDriverWait(self.driver, 20).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, self.auth_config["username_selector"]))
+                )
+                username_field.clear()
+                username_field.send_keys(self.auth_config.get("username", ""))
+            
+            # Fill password
+            if self.auth_config.get("password_selector"):
+                password_field = WebDriverWait(self.driver, 20).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, self.auth_config["password_selector"]))
+                )
+                password_field.clear()
+                password_field.send_keys(self.auth_config.get("password", ""))
+            
+            # Submit form
+            if self.auth_config.get("submit_selector"):
+                submit_button = WebDriverWait(self.driver, 20).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, self.auth_config["submit_selector"]))
+                )
+                submit_button.click()
+            
+            # Wait for login to complete
+            time.sleep(5)
+            
+            # Perform post-login actions
+            for action in self.auth_config.get("post_login_actions", []):
+                self.perform_action(action)
+            
+            # Check for success indicator
+            if self.auth_config.get("success_indicator"):
+                try:
+                    WebDriverWait(self.driver, 20).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, self.auth_config["success_indicator"]))
+                    )
+                    self.logger.info("Form authentication successful - success indicator found")
+                    self.is_authenticated = True
+                except TimeoutException:
+                    self.logger.error("Form authentication failed - success indicator not found")
+                    return False
+            
+            # Check for error indicator
+            if self.auth_config.get("error_indicator"):
+                try:
+                    error_element = self.driver.find_element(By.CSS_SELECTOR, self.auth_config["error_indicator"])
+                    if error_element.is_displayed():
+                        self.logger.error(f"Form authentication failed - error detected: {error_element.text}")
+                        return False
+                except:
+                    # No error found, which is good
+                    pass
+            
+            # If no explicit success/error indicators, assume success if neither is set
+            if not self.auth_config.get("success_indicator") and not self.auth_config.get("error_indicator"):
+                self.logger.info("Form authentication assumed successful (no indicators set)")
+                self.is_authenticated = True
+            
+            # Store cookies for later use
+            self.cookies = self.driver.get_cookies()
+            
+            # Take a screenshot of successful login
+            if self.output_manager:
+                screenshot_path = self.output_manager.get_path("screenshots", "auth_success.png")
+                self.output_manager.ensure_path_exists("screenshots")
+                self.driver.save_screenshot(str(screenshot_path))
+                self.logger.info(f"Authentication screenshot saved to {screenshot_path}")
+            
+            self.logger.info("Form authentication completed successfully")
+            return self.is_authenticated
+            
+        except Exception as e:
+            self.logger.error(f"Form authentication error: {e}")
+            
+            # Take screenshot of error state
+            if self.output_manager and self.driver:
+                screenshot_path = self.output_manager.get_path("screenshots", "auth_error.png")
+                self.output_manager.ensure_path_exists("screenshots")
+                self.driver.save_screenshot(str(screenshot_path))
+                self.logger.info(f"Authentication error screenshot saved to {screenshot_path}")
+                
+            return False
     
     def _form_login(self) -> bool:
         """
