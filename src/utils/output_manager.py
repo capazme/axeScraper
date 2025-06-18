@@ -6,6 +6,7 @@ from pathlib import Path
 import datetime
 import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
+from .config import OUTPUT_ROOT
 
 class OutputManager:
     """
@@ -15,21 +16,22 @@ class OutputManager:
     
     def __init__(
         self,
-        base_dir: Union[str, Path],
-        domain: str,
+        base_dir: Union[str, Path] = None,
+        domain: str = None,
         timestamp: Optional[str] = None,
         create_dirs: bool = True,
         config: Optional[Dict[str, Any]] = None
     ):
         """Initialize the output manager with domain-specific structure."""
-        self.base_dir = Path(base_dir)
+        # Usa sempre OUTPUT_ROOT come base_dir di default
+        self.base_dir = Path(base_dir) if base_dir else Path(OUTPUT_ROOT)
         self.domain = domain
         
         # Generate timestamp for this run
         self.timestamp = timestamp or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
-        # Create safe domain slug for directory names
-        self.domain_slug = self._create_safe_slug(domain)
+        # Usa 'generic' come slug se domain è None
+        self.domain_slug = self._create_safe_slug(domain) if domain else "generic"
         
         # Standard directory structure for all domains
         self.structure = {

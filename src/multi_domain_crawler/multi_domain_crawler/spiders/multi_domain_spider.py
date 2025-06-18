@@ -19,13 +19,14 @@ import scrapy
 from scrapy.linkextractors import LinkExtractor
 from scrapy.loader import ItemLoader
 from scrapy.utils.url import url_has_any_extension
-from scrapy.http import Request
+from scrapy.http import Request, HtmlResponse, TextResponse
 from scrapy.exceptions import CloseSpider
 
 from ..items import PageItem, PageItemLoader
 from ..utils.url_filters import URLFilters
 from ..utils.link_extractor import AdvancedLinkExtractor
 from scrapy_selenium import SeleniumRequest
+from ..utils.browser_headers import get_realistic_headers
 
 # Import configuration system
 import sys
@@ -89,14 +90,18 @@ class MultiDomainSpider(scrapy.Spider):
         # Configure allowed_domains and start_urls
         self.allowed_domains = self.domains.copy()
         
-        # Prepare initial URLs (both www and non-www versions)
+        # Prepare initial URLs - use domains as specified, don't auto-add www
         self.start_urls = []
-        for domain in self.domains:
-            self.start_urls.append(f"https://www.{domain}")
-            self.start_urls.append(f"https://{domain}")
-            
-        # Make initial URLs unique
-        self.start_urls = list(set(self.start_urls))
+        
+        # Check if we have BASE_URLS from config to respect the exact URLs specified
+        base_urls = []
+        if self.config_manager is not None:
+            base_urls = self.config_manager.get("BASE_URLS", [])
+        self.logger.info(f"DEBUG: BASE_URLS letto dalla config: {base_urls}")
+        if not base_urls:
+            base_urls = ["www.nortbeachwear.com"]
+            self.logger.warning("BASE_URLS non trovato o vuoto, forzato a /it/!")
+        self.start_urls = base_urls.copy()
         self.logger.info(f"Starting URLs: {', '.join(self.start_urls)}")
 
         # Configuration limits - read from config with fallback to kwargs with defaults
@@ -249,6 +254,11 @@ class MultiDomainSpider(scrapy.Spider):
                          f"request_delay={self.request_delay}, "
                          f"selenium_threshold={self.selenium_threshold}")
     
+    def normalize_url(self, url):
+        if not url.startswith(('http://', 'https://')):
+            return 'https://' + url
+        return url
+
     def start_requests(self):
         """
         Generate initial requests based on the configured parameters.
@@ -265,23 +275,50 @@ class MultiDomainSpider(scrapy.Spider):
         # Verify starting URLs
         if not self.start_urls:
             self.logger.error("No starting URLs defined!")
-            self.start_urls = [f"https://www.{domain}" for domain in self.domains]
-            
+            # Fallback: create URLs from domains without auto-adding www
+            self.start_urls = [f"https://{domain}" for domain in self.domains]
+        
+        # Prepara header Authorization se HTTP Basic è configurato
+        import base64
+        username = self.config_manager.get("AUTH_BASIC_USERNAME", "") if self.config_manager else ""
+        password = self.config_manager.get("AUTH_BASIC_PASSWORD", "") if self.config_manager else ""
+        auth_headers = {}
+        if username and password:
+            credentials = f"{username}:{password}"
+            encoded_credentials = base64.b64encode(credentials.encode()).decode()
+            auth_headers["Authorization"] = f"Basic {encoded_credentials}"
+            self.logger.info("Header Authorization HTTP Basic aggiunto alle richieste iniziali")
+        
         # Process each starting URL
-        for url in self.start_urls:
-            self.logger.info(f"Requesting initial URL: {url}")
-            
-            # Use Selenium or HTTP based on configuration
-            if self.hybrid_mode and self.using_selenium:
-                yield self.make_selenium_request(url, self.parse)
+        for i, url in enumerate(self.start_urls):
+            url = self.normalize_url(url)
+            headers = get_realistic_headers()
+            headers.update(auth_headers)
+            if i == 0:
+                self.logger.info(f"Requesting initial URL with Selenium: {url}")
+                yield SeleniumRequest(
+                    url=url,
+                    headers=headers,
+                    callback=self.parse,
+                    wait_time=3,
+                    meta={
+                        'dont_redirect': False,
+                        'handle_httpstatus_list': [301, 302],
+                        'depth': 0,
+                        'selenium': True
+                    },
+                    errback=self.errback_httpbin
+                )
             else:
+                self.logger.info(f"Requesting initial URL: {url}")
                 yield Request(
-                    url=url, 
+                    url=url,
+                    headers=headers,
                     callback=self.parse,
                     meta={
-                        'dont_redirect': False, 
+                        'dont_redirect': False,
                         'handle_httpstatus_list': [301, 302],
-                        'depth': 0  # Initial depth
+                        'depth': 0
                     },
                     errback=self.errback_httpbin
                 )
@@ -410,9 +447,31 @@ class MultiDomainSpider(scrapy.Spider):
         Yields:
             Item or Request: Scraped items or new requests
         """
+        if not isinstance(response, (HtmlResponse, TextResponse)):
+            self.logger.debug(f"Salto risposta non testuale: {response.url} (type: {type(response)})")
+            return
+        
+        # Log dettagliato per risposte non 2xx
+        if not (200 <= response.status < 300):
+            self.logger.error(f"Risposta non 2xx: {response.url} | Status: {response.status}")
+            self.logger.error(f"Headers: {dict(response.headers)}")
+            body_preview = response.text[:500] if hasattr(response, 'text') else str(response.body)[:500]
+            self.logger.error(f"Body (primi 500 char): {body_preview}")
+
         current_url = response.url
         current_domain = URLFilters.get_domain(current_url)
         
+        # Salva l'HTML della prima pagina scaricata (solo una volta)
+        if getattr(self, '_first_page_saved', False) is False:
+            import os
+            debug_dir = os.path.join(os.getcwd(), 'output')
+            os.makedirs(debug_dir, exist_ok=True)
+            debug_path = os.path.join(debug_dir, 'debug_first_page.html')
+            with open(debug_path, 'w', encoding='utf-8') as f:
+                f.write(response.text)
+            self.logger.info(f"Salvato HTML della prima pagina in: {debug_path}")
+            self._first_page_saved = True
+
         self.logger.info(f"Parsing page: {current_url} ({current_domain})")
         
         # Check if domain is allowed
@@ -462,16 +521,19 @@ class MultiDomainSpider(scrapy.Spider):
         
         # Extract links
         links = self.link_extractor.extract_links(response, current_domain)
+        self.logger.info(f"Links estratti: {links}")
         
         # Add JavaScript links
         js_links = self._extract_js_links(response)
         links.update(js_links)
+        self.logger.info(f"Links dopo aggiunta JS: {links}")
         
         # Filter links
         filtered_links = {
             link for link in links 
             if URLFilters.is_valid_url(link) and URLFilters.get_domain(link) == current_domain and self.is_public_page(link)
         }
+        self.logger.info(f"Links dopo filtro: {filtered_links}")
         
         # Check if we should switch from Selenium to HTTP in hybrid mode
         if self.hybrid_mode and not self.switch_occurred:
@@ -513,6 +575,7 @@ class MultiDomainSpider(scrapy.Spider):
                 if self.depth_limit and new_depth > self.depth_limit:
                     continue
                 
+                headers = get_realistic_headers(referer=current_url)
                 if self.hybrid_mode and self.using_selenium:
                     req = self.make_selenium_request(
                         link, 
@@ -521,12 +584,14 @@ class MultiDomainSpider(scrapy.Spider):
                         depth=new_depth
                     )
                     if req:
+                        req.headers = headers
                         requests_generated += 1
                         yield req
                 else:
                     requests_generated += 1
                     yield Request(
                         url=link, 
+                        headers=headers,
                         callback=self.parse,
                         meta={
                             'referer': current_url,
@@ -558,6 +623,14 @@ class MultiDomainSpider(scrapy.Spider):
         self.logger.error(f"Error processing: {url}")
         self.logger.error(f"Error type: {failure.type}")
         self.logger.error(f"Error value: {failure.value}")
+        # Log dettagliato della risposta se presente
+        response = getattr(failure, 'value', None)
+        if hasattr(response, 'response') and response.response is not None:
+            resp = response.response
+            self.logger.error(f"[errback] Status: {resp.status}")
+            self.logger.error(f"[errback] Headers: {dict(resp.headers)}")
+            body_preview = resp.text[:500] if hasattr(resp, 'text') else str(resp.body)[:500]
+            self.logger.error(f"[errback] Body (primi 500 char): {body_preview}")
         
         # Update statistics
         if domain in self.domains:

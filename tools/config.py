@@ -398,3 +398,5 @@ OUTPUT_CONFIG = {
 
 # Version information
 VERSION = "1.0.0"
+
+# OUTPUT_ROOT è la root unica per tutti gli output. Tutte le strutture di output devono derivare da OUTPUT_ROOT.

@@ -82,6 +82,11 @@ class FunnelManager:
             "funnels": funnel_definition
         }
     
+    def use_existing_driver(self, driver):
+        """Use an existing driver instead of creating a new one."""
+        self.driver = driver
+        self.logger.info("Using existing driver for funnel execution")
+
     @log_method
     def initialize_driver(self, headless: bool = True) -> None:
         """

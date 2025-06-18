@@ -183,10 +183,10 @@ def create_domain_output_structure(base_urls: List[str], root_output_dir: str) -
     
     for base_url in base_urls:
         # Generate a safe slug for the domain
-        domain_slug = generate_safe_slug(base_url)
+        DOMAIN_SLUG = generate_safe_slug(base_url)
         
         # Create root directory for the domain
-        domain_root = Path(root_output_dir) / domain_slug
+        domain_root = Path(root_output_dir) / DOMAIN_SLUG
         
         # Directory structure for each domain
         output_dirs = {
@@ -223,7 +223,7 @@ def get_url_config(base_url: str) -> Dict[str, Any]:
     domain_dirs = DOMAIN_OUTPUTS[base_url]
     
     # Generate a safe slug for the domain
-    domain_slug = generate_safe_slug(base_url)
+    DOMAIN_SLUG = generate_safe_slug(base_url)
     
     # Extract domain for multi_domain_crawler
     domains = base_url
@@ -235,12 +235,12 @@ def get_url_config(base_url: str) -> Dict[str, Any]:
             "base_url": base_url,
             "domains": domain_name,  # Just the domain, not the full URL for multi_domain_crawler
             "max_workers": get_env_int("AXE_CRAWLER_MAX_WORKERS", DEFAULT_MAX_WORKERS),
-            "state_file": str(domain_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
+            "state_file": str(domain_dirs["crawler"] / f"crawler_state_{DOMAIN_SLUG}.pkl"),
             "max_urls": get_env_int("AXE_CRAWLER_MAX_URLS", 100),
             "max_retries": get_env_int("AXE_CRAWLER_MAX_RETRIES", 10),
             "request_delay": get_env_float("AXE_CRAWLER_REQUEST_DELAY", 0.25),
             "selenium_browser": get_env_bool("AXE_CRAWLER_USE_SELENIUM", False),
-            "output_markdown": str(domain_dirs["reports"] / f"site_structure_{domain_slug}.md"),
+            "output_markdown": str(domain_dirs["reports"] / f"site_structure_{DOMAIN_SLUG}.md"),
             "hybrid_mode": get_env_bool("AXE_CRAWLER_HYBRID_MODE", True),
             "pending_threshold": get_env_int("AXE_CRAWLER_PENDING_THRESHOLD", 250),
             
@@ -257,23 +257,23 @@ def get_url_config(base_url: str) -> Dict[str, Any]:
             "output_dir": str(domain_dirs["crawler"]),
         },
         "axe_analysis_config": {
-            "analysis_state_file": str(domain_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
+            "analysis_state_file": str(domain_dirs["crawler"] / f"crawler_state_{DOMAIN_SLUG}.pkl"),
             "domains": domain_name,  # Added for multi_domain_crawler
             "max_templates_per_domain": get_env_int("AXE_MAX_TEMPLATES", None),
             "fallback_urls": [base_url],
             "pool_size": get_env_int("AXE_POOL_SIZE", 5),
             "sleep_time": get_env_float("AXE_SLEEP_TIME", 1),
-            "excel_filename": str(domain_dirs["axe"] / f"accessibility_report_{domain_slug}.xlsx"),
-            "visited_file": str(domain_dirs["axe"] / f"visited_urls_{domain_slug}.txt"),
+            "excel_filename": str(domain_dirs["axe"] / f"accessibility_report_{DOMAIN_SLUG}.xlsx"),
+            "visited_file": str(domain_dirs["axe"] / f"visited_urls_{DOMAIN_SLUG}.txt"),
             "headless": get_env_bool("AXE_HEADLESS", True),
             "resume": get_env_bool("AXE_RESUME", True),
             "output_folder": str(domain_dirs["axe"]),
         },
         "final_report_config": {
-            "input_excel": str(domain_dirs["axe"] / f"accessibility_report_{domain_slug}.xlsx"),
-            "output_concat": str(domain_dirs["analysis"] / f"{domain_slug}_concat.xlsx"),
-            "output_excel": str(domain_dirs["analysis"] / f"final_analysis_{domain_slug}.xlsx"),
-            "crawler_state_file": str(domain_dirs["crawler"] / f"crawler_state_{domain_slug}.pkl"),
+            "input_excel": str(domain_dirs["axe"] / f"accessibility_report_{DOMAIN_SLUG}.xlsx"),
+            "output_concat": str(domain_dirs["analysis"] / f"{DOMAIN_SLUG}_concat.xlsx"),
+            "output_excel": str(domain_dirs["analysis"] / f"final_analysis_{DOMAIN_SLUG}.xlsx"),
+            "crawler_state_file": str(domain_dirs["crawler"] / f"crawler_state_{DOMAIN_SLUG}.pkl"),
             "charts_output_dir": str(domain_dirs["charts"]),
         },
         "output_dirs": domain_dirs
@@ -374,23 +374,23 @@ OUTPUT_CONFIG = {
         "crawler": {
             "subdirectory": "crawler_output",
             "file_patterns": {
-                "state": "crawler_state_{domain_slug}.pkl",
+                "state": "crawler_state_{DOMAIN_SLUG}.pkl",
                 "log": "crawler_{timestamp}.log",
-                "report": "crawler_report_{domain_slug}_{timestamp}.{ext}"
+                "report": "crawler_report_{DOMAIN_SLUG}_{timestamp}.{ext}"
             }
         },
         "axe": {
             "subdirectory": "axe_output",
             "file_patterns": {
-                "excel": "accessibility_report_{domain_slug}.xlsx",
-                "visited": "visited_urls_{domain_slug}.txt"
+                "excel": "accessibility_report_{DOMAIN_SLUG}.xlsx",
+                "visited": "visited_urls_{DOMAIN_SLUG}.txt"
             }
         },
         "analysis": {
             "subdirectory": "analysis_output",
             "file_patterns": {
-                "excel": "final_analysis_{domain_slug}.xlsx",
-                "concat": "{domain_slug}_concat.xlsx"
+                "excel": "final_analysis_{DOMAIN_SLUG}.xlsx",
+                "concat": "{DOMAIN_SLUG}_concat.xlsx"
             }
         }
     }

@@ -4,6 +4,7 @@
 import os
 import multiprocessing
 from shutil import which
+import logging
 
 # ----- IMPOSTAZIONI BASE -----
 BOT_NAME = 'multi_domain_crawler'
@@ -93,6 +94,14 @@ LOG_FILE = None  # Configurabile tramite CLI
 # Formattazione dei log
 LOG_FORMAT = '%(asctime)s [%(name)s] %(levelname)s: %(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
+
+# Configura livelli specifici per logger troppo verbosi
+logging.getLogger('selenium.webdriver.remote.remote_connection').setLevel(logging.WARNING)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+logging.getLogger('urllib3.util.retry').setLevel(logging.WARNING)
+logging.getLogger('selenium.webdriver.common.service').setLevel(logging.WARNING)
+logging.getLogger('selenium.webdriver.chrome.service').setLevel(logging.WARNING)
+logging.getLogger('seleniumwire').setLevel(logging.WARNING)
 
 # ----- METRICHE E MONITORAGGIO -----
 MEMUSAGE_ENABLED = True

@@ -2,6 +2,7 @@ import logging
 import subprocess
 from .config import EMAIL_CONFIG
 from .logging_config import get_logger
+from .output_manager import OutputManager
 
 logger = get_logger("email_sender")
 
@@ -19,5 +20,5 @@ def send_email_report(excel_files, recipient_email=EMAIL_CONFIG["recipient_email
         
 if __name__ == "__main__":
     send_email_report([
-        "/home/ec2-user/axeScraper/output/locautorent_com/funnels/car_rent/step_7_checkout.html"
+        OutputManager.get_path('funnels', 'car_rent', 'step_7_checkout.html')
         ])

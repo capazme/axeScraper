@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import sys
+from .output_manager import OutputManager
+from .config import OUTPUT_ROOT
 
 def setup_logging(
     log_level: str = "INFO",
@@ -81,7 +83,7 @@ def setup_logging(
     
     return logger
 
-def get_logger(component_name, log_config=None, output_manager=None):
+def get_logger(component_name, log_config=None, output_manager=None, domain_slug=None):
     """Get properly configured logger with file output."""
     # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
@@ -103,7 +105,7 @@ def get_logger(component_name, log_config=None, output_manager=None):
         log_file = log_config.get("log_file", log_file)
     
     # Determine log directory - create it explicitly
-    log_dir = "./logs"  # Default fallback
+    log_dir = OutputManager(domain=domain_slug).get_path('logs')  # Usa lo slug se disponibile
     
     if output_manager:
         try:

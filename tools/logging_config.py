@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import sys
+from src.utils.output_manager import OutputManager
 
 def setup_logging(
     log_level: str = "INFO",
