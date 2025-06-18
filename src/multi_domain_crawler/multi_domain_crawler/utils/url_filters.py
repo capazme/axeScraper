@@ -97,7 +97,33 @@ class URLFilters:
         # Verifica estensione
         if any(url.lower().endswith(ext) for ext in URLFilters.EXCLUDED_EXTENSIONS):
             return False
-            
+        
+        # Nuovo filtro: escludi URL che puntano a immagini tramite parametri query string
+        query = parsed.query.lower()
+        image_query_patterns = [
+            'format=jpeg', 'format=jpg', 'format=png', 'format=gif', 'format=webp',
+            'type=jpeg', 'type=jpg', 'type=png', 'type=gif', 'type=webp',
+            'ext=jpeg', 'ext=jpg', 'ext=png', 'ext=gif', 'ext=webp',
+            'mimetype=image', 'mimetype=jpeg', 'mimetype=jpg', 'mimetype=png', 'mimetype=gif', 'mimetype=webp',
+        ]
+        if any(param in query for param in image_query_patterns):
+            return False
+        
+        # Escludi URL che contengono path tipici di immagini e query che indica formato immagine
+        image_path_keywords = ['/image', '/images', '/media', '/img', '/photo', '/photos', '/picture', '/pictures']
+        if (
+            any(kw in parsed.path.lower() for kw in image_path_keywords)
+            and any(x in query for x in ['jpeg', 'jpg', 'png', 'gif', 'webp'])
+        ):
+            return False
+
+        # Nuovo filtro: escludi se la query contiene parametri come ?img=... o ?photo=...
+        # o se la query contiene la parola 'image' o 'jpeg' ovunque (come chiave o valore)
+        if re.search(r'[?&](img|photo|picture|media|file)=[^&]+', '?' + query):
+            return False
+        if 'image' in query or 'jpeg' in query:
+            return False
+        
         # Verifica percorsi da escludere
         if any(path in url.lower() for path in URLFilters.EXCLUDED_PATHS):
             return False

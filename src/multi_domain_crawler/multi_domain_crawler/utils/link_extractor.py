@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
 from scrapy.linkextractors import LinkExtractor as ScrapyLinkExtractor
+from scrapy.http import HtmlResponse, TextResponse
 
 from ..utils.url_filters import URLFilters
 
@@ -61,6 +62,11 @@ class AdvancedLinkExtractor:
         Returns:
             set: Set di URL unici estratti e filtrati
         """
+        # Verifica che la risposta sia testuale (HTML o testo)
+        if not isinstance(response, (HtmlResponse, TextResponse)):
+            logger.debug(f"Response non testuale per URL: {response.url} (type: {type(response)})")
+            return set()
+        
         url = response.url
         html_text = response.text
         base_url = response.url

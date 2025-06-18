@@ -581,16 +581,48 @@ class AxeAnalysis:
         try:
             # Check if authentication is needed
             auth_required = False
+            auth_strategy = None
+            
             if self.auth_manager and hasattr(self.auth_manager, 'is_auth_required'):
                 auth_required = self.auth_manager.is_auth_required(url)
+                if auth_required and hasattr(self.auth_manager, 'get_auth_strategy_for_url'):
+                    auth_strategy = self.auth_manager.get_auth_strategy_for_url(url)
             
             # Apply authentication if needed
             if auth_required and self.auth_manager:
-                if not self.auth_manager.is_authenticated:
-                    await asyncio.to_thread(self.auth_manager.login)
-                if self.auth_manager.is_authenticated:
-                    await asyncio.to_thread(self.auth_manager.apply_auth_to_driver, driver)
-                    logger.info(f"Applied authentication for {url}")
+                if auth_strategy == "http_basic":
+                    # For HTTP Basic, apply before navigating
+                    logger.info(f"Applying HTTP Basic authentication for {url}")
+                    
+                    # Apply HTTP Basic authentication via CDP
+                    try:
+                        network_conditions = {
+                            'offline': False,
+                            'latency': 0,
+                            'downloadThroughput': 0,
+                            'uploadThroughput': 0
+                        }
+                        driver.execute_cdp_cmd('Network.emulateNetworkConditions', network_conditions)
+                        driver.execute_cdp_cmd('Network.enable', {})
+                        
+                        # Extract credentials from auth_manager
+                        credentials = self.auth_manager.http_basic_credentials
+                        if credentials:
+                            driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                                'headers': {'Authorization': credentials}
+                            })
+                            logger.info(f"Applied HTTP Basic auth headers to {url}")
+                        else:
+                            logger.warning(f"HTTP Basic credentials missing for {url}")
+                    except Exception as e:
+                        logger.error(f"Error applying HTTP Basic auth: {e}")
+                else:
+                    # For form authentication, login and apply cookies
+                    if not self.auth_manager.is_authenticated:
+                        await asyncio.to_thread(self.auth_manager.login)
+                    if self.auth_manager.is_authenticated:
+                        await asyncio.to_thread(self.auth_manager.apply_auth_to_driver, driver)
+                        logger.info(f"Applied form authentication for {url}")
 
             await asyncio.to_thread(robust_driver_get, driver, url)
             await asyncio.sleep(self.sleep_time)
@@ -619,7 +651,8 @@ class AxeAnalysis:
                         "target": ", ".join([", ".join(x) if isinstance(x, list) else x for x in node.get("target", [])]),
                         "html": node.get("html", ""),
                         "failure_summary": node.get("failureSummary", ""),
-                        "auth_required": auth_required  # Add authentication flag
+                        "auth_required": auth_required,
+                        "auth_strategy": auth_strategy
                     }
                     issues.append(issue)
             
@@ -633,7 +666,7 @@ class AxeAnalysis:
             logger.exception(f"Error processing {url}: {e}")
         finally:
             await driver_pool.put(driver)
-
+    
     async def run(self) -> None:
         """Process all pending URLs using the driver pool."""
         if not self.pending_urls:

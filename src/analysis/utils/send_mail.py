@@ -1,8 +1,7 @@
 import logging
 import subprocess
-from .config import EMAIL_CONFIG
-from .logging_config import get_logger
-from .output_manager import OutputManager
+from config import EMAIL_CONFIG
+from logging_config import get_logger
 
 logger = get_logger("email_sender")
 
@@ -20,5 +19,5 @@ def send_email_report(excel_files, recipient_email=EMAIL_CONFIG["recipient_email
         
 if __name__ == "__main__":
     send_email_report([
-        OutputManager.get_path('funnels', 'car_rent', 'step_7_checkout.html')
+        "/home/ec2-user/axeScraper/output/locautorent_com_auth/analysis_output/accessibility_report_locautorent_com_auth_concat.xlsx"
         ])
