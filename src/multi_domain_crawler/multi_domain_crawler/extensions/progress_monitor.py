@@ -31,13 +31,23 @@ class SpiderProgressMonitor:
         self.progress_bar = None
         self.start_time = None
         self.last_log_time = 0
-        self.log_interval = 5  # secondi
         
-        # Opzioni di visualizzazione
+        # Opzioni di visualizzazione da settings con fallback
         settings = crawler.settings
+        self.log_interval = settings.getint('PROGRESS_LOG_INTERVAL', 5)  # secondi
         self.show_eta = settings.getbool('PROGRESS_SHOW_ETA', True)
         self.show_domains = settings.getbool('PROGRESS_SHOW_DOMAINS', True)
         self.show_speed = settings.getbool('PROGRESS_SHOW_SPEED', True)
+        
+        # Integrazione con ConfigurationManager se disponibile nello spider
+        self.config_manager = None
+        if hasattr(crawler, 'spider') and hasattr(crawler.spider, 'config_manager'):
+            self.config_manager = crawler.spider.config_manager
+            if self.config_manager:
+                self.log_interval = self.config_manager.get('PROGRESS_LOG_INTERVAL', self.log_interval)
+                self.show_eta = self.config_manager.get_bool('PROGRESS_SHOW_ETA', self.show_eta)
+                self.show_domains = self.config_manager.get_bool('PROGRESS_SHOW_DOMAINS', self.show_domains)
+                self.show_speed = self.config_manager.get_bool('PROGRESS_SHOW_SPEED', self.show_speed)
         
         # Collega i segnali
         crawler.signals.connect(self.spider_opened, signal=signals.spider_opened)

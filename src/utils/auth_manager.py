@@ -47,7 +47,8 @@ class AuthenticationManager:
         # Setup logger
         self.logger = get_logger("auth_manager", 
                            self.config_manager.get_logging_config()["components"].get("auth_manager", {}),
-                           output_manager)
+                           output_manager,
+                           domain=self.domain)
         
         # Load auth configuration
         self.auth_config = self._load_auth_config()

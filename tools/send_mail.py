@@ -28,7 +28,7 @@ def send_email_report(files_to_send, recipient_email=EMAIL_CONFIG["recipient_ema
 if __name__ == "__main__":
     # Inserisci qui i file che vuoi inviare come allegati
     files_to_send = [
-        "/home/ec2-user/axeScraper/output/test_locautorent_com_auth/analysis_output/temp_test_locautorent_com_auth_concat.xlsx",
+        "/home/ec2-user/axeScraper/output/nortbeachwear_com/analysis_output/final_analysis_report_nortbeachwear_com.xlsx"
     ]
     if not files_to_send:
         logger.warning("Nessun file specificato per l'invio. Modifica 'files_to_send' con i file desiderati.")

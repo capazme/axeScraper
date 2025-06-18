@@ -1,0 +1,109 @@
+{
+  "domain": "nortbeachwear.com",
+  "timestamp": "2025-06-18T12:53:18.108132",
+  "templates": {
+    "www.nortbeachwear.com:/cdn/shop/files/{image}": {
+      "url": "https://www.nortbeachwear.com/cdn/shop/files/WEB.png?v=1729859124&width=3000",
+      "count": 16,
+      "template": "www.nortbeachwear.com:/cdn/shop/files/{image}",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/cdn/shop/products/{image}": {
+      "url": "https://www.nortbeachwear.com/cdn/shop/products/ROCOCO3_f0284ccb-24ba-45e5-8f6a-ad4397afd2b0.jpg?v=1706285197&width=800",
+      "count": 2,
+      "template": "www.nortbeachwear.com:/cdn/shop/products/{image}",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/": {
+      "url": "https://www.nortbeachwear.com/",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/products/costume-intero-isabella-rococo": {
+      "url": "https://www.nortbeachwear.com/products/costume-intero-isabella-rococo?variant=46458551173461",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/products/costume-intero-isabella-rococo",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/sport-1": {
+      "url": "https://www.nortbeachwear.com/collections/sport-1",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/sport-1",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/nuova-collezione-donna": {
+      "url": "https://www.nortbeachwear.com/collections/nuova-collezione-donna",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/nuova-collezione-donna",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/nuova-collezione-uomo": {
+      "url": "https://www.nortbeachwear.com/collections/nuova-collezione-uomo",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/nuova-collezione-uomo",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/camicia-di-lino": {
+      "url": "https://www.nortbeachwear.com/collections/camicia-di-lino",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/camicia-di-lino",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/pages/faqs": {
+      "url": "https://www.nortbeachwear.com/pages/faqs",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/pages/faqs",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/uomo": {
+      "url": "https://www.nortbeachwear.com/collections/uomo",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/uomo",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/pages/cookie-policy": {
+      "url": "https://www.nortbeachwear.com/pages/cookie-policy",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/pages/cookie-policy",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/contact": {
+      "url": "https://www.nortbeachwear.com/contact",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/contact",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/collections/short": {
+      "url": "https://www.nortbeachwear.com/collections/short",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/collections/short",
+      "domain": "nortbeachwear.com"
+    },
+    "www.nortbeachwear.com:/products/costume-intero-isabella-korina": {
+      "url": "https://www.nortbeachwear.com/products/costume-intero-isabella-korina?variant=46458546717013",
+      "count": 1,
+      "template": "www.nortbeachwear.com:/products/costume-intero-isabella-korina",
+      "domain": "nortbeachwear.com"
+    }
+  },
+  "stats": {
+    "unique_pages": 29,
+    "templates_count": 14,
+    "success": 0,
+    "client_errors": 0,
+    "server_errors": 0
+  },
+  "last_urls": [
+    "https://www.nortbeachwear.com/products/costume-intero-isabella-korina?variant=46458546717013",
+    "https://www.nortbeachwear.com/cdn/shop/files/ROCOCO1_fbf7557d-896e-472a-8c23-1ae7fe6e5fa2.jpg?v=1706285197",
+    "https://www.nortbeachwear.com/cdn/shop/files/RAMATO1_435d9743-7b5a-4d34-be55-b174d2771d13.jpg?v=1706285176&width=700",
+    "https://www.nortbeachwear.com/cdn/shop/files/RAMATO1_435d9743-7b5a-4d34-be55-b174d2771d13.jpg?v=1706285176&width=700",
+    "https://www.nortbeachwear.com/cdn/shop/products/ROCOCO2_faf4c504-935a-4a96-97e5-67b814083a5c.jpg?v=1706285197&width=1200",
+    "https://www.nortbeachwear.com/cdn/shop/files/NERO1_acbb557f-c404-401c-975f-d5204ffa1093.jpg?v=1706285232&width=700",
+    "https://www.nortbeachwear.com/cdn/shop/products/ROCOCO3_f0284ccb-24ba-45e5-8f6a-ad4397afd2b0.jpg?v=1706285197&width=800",
+    "https://www.nortbeachwear.com/collections/short",
+    "https://www.nortbeachwear.com/contact",
+    "https://www.nortbeachwear.com/cdn/shop/files/1_winter.png?v=1730202437&width=1200"
+  ]
+}

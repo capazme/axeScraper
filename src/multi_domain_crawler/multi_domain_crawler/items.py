@@ -29,6 +29,10 @@ class PageItem(scrapy.Item):
     images = scrapy.Field()
     timestamp = scrapy.Field()
     status = scrapy.Field()
+    status_code = scrapy.Field()
+    h1_text = scrapy.Field()
+    html_content = scrapy.Field()
+    text_content = scrapy.Field()
     depth = scrapy.Field()
     crawl_time = scrapy.Field()
 

@@ -28,7 +28,7 @@ import shutil
 from datetime import datetime
 
 # Import delle classi centrali di gestione
-from utils.config_manager import ConfigurationManager
+from utils.config_manager import ConfigurationManager, get_config_manager
 from utils.logging_config import get_logger
 from utils.output_manager import OutputManager
 from utils.auth_manager import AuthenticationManager
@@ -64,22 +64,26 @@ class Pipeline:
             config_file: Percorso del file di configurazione (opzionale)
             cli_args: Argomenti da linea di comando (opzionale)
         """
-        # Inizializza il gestore di configurazione con il nuovo schema
         self.config_manager = ConfigurationManager(
             project_name="axeScraper",
             config_file=config_file,
             cli_args=cli_args or {}
         )
+        base_urls = self.config_manager.get_list("BASE_URLS")
+        self.real_domain = base_urls[0] if base_urls else None
+        if not self.real_domain:
+            raise ValueError("No BASE_URLS configured in config.json")
+        # Configura il logger con output manager
+        self.logger = get_logger(
+            "pipeline",
+            self.config_manager.get_logging_config()["components"]["pipeline"],
+            output_manager=None,
+            domain=self.real_domain
+        )
         
         # Attiva la modalità debug se richiesto
         if self.config_manager.get_bool("DEBUG", False):
             self.config_manager.set_debug_mode(True)
-        
-        # Configura il logger con output manager
-        self.logger = get_logger(
-            "pipeline", 
-            self.config_manager.get_logging_config()["components"]["pipeline"]
-        )
         
         # Mostra riepilogo configurazione all'avvio
         self.config_manager.log_config_summary()
@@ -115,15 +119,14 @@ class Pipeline:
         self.funnel_manager = None
 
         # Inizializza un OutputManager generico per l'analyzer
-        base_dir = self.config_manager.get('OUTPUT_BASE_DIR', 'output')
-        domain = self.config_manager.get('DOMAIN', 'generic')
-        generic_output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=domain)
+        domain_slug = self.config_manager.domain_to_slug(self.real_domain)
+        generic_output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=self.real_domain)
         self.analyzer = AccessibilityAnalyzer(output_manager=generic_output_manager)
 
         # Centralizza e ordina la gestione del logging e dell'output
         self.logger.info("=== INIZIO PIPELINE DI ACCESSIBILITÀ ===")
-        self.logger.info(f"Output base: {base_dir}")
-        self.logger.info(f"Dominio: {domain}")
+        self.logger.info(f"Output base: {OUTPUT_ROOT}")
+        self.logger.info(f"Dominio: {self.real_domain}")
         self.logger.info(f"OutputManager base_dir: {generic_output_manager.base_dir}")
         self.logger.info(f"OutputManager domain_slug: {generic_output_manager.domain_slug}")
         self.logger.info(f"Percorsi OutputManager: {getattr(generic_output_manager, 'paths', {})}")
@@ -247,7 +250,7 @@ class Pipeline:
         output_dir = str(output_manager.get_path("crawler"))
         state_file = str(output_manager.get_crawler_state_path())
         log_file = str(output_manager.get_timestamped_path(
-            "logs", f"crawler_{output_manager.domain_slug}", "log"))
+            "logs", f"{output_manager.domain_slug}", "log"))
         
         # Log percorsi per debug
         self.logger.info(f"Directory output crawler: {output_dir}")
@@ -1186,11 +1189,7 @@ class Pipeline:
         domain_config = self.config_manager.load_domain_config(base_url)
         
         # Create output manager
-        output_manager = OutputManager(
-            base_dir=self.config_manager.get_path("OUTPUT_DIR", "~/axeScraper/output", create=True),
-            domain=base_url,
-            create_dirs=True
-        )
+        output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=self.real_domain)
         
         # Initialize authentication (don't login yet) and get restricted URLs 
         auth_setup_success, restricted_urls = await self.run_authentication(base_url, domain_config, output_manager)
@@ -1233,11 +1232,7 @@ class Pipeline:
                 self.logger.info(f"Running dedicated analysis on {len(restricted_urls)} restricted URLs")
                 
                 # Create separate output manager for authenticated content
-                auth_output_manager = OutputManager(
-                    base_dir=output_manager.base_dir,
-                    domain=f"{output_manager.domain_slug}_auth",
-                    create_dirs=True
-                )
+                auth_output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=self.real_domain)
                 
                 # Only attempt authentication now if we have restricted URLs to analyze
                 auth_success = False

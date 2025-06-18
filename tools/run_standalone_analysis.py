@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.analysis.report_analysis import AccessibilityAnalyzer
 from src.utils.output_manager import OutputManager
 from src.utils.config import OUTPUT_ROOT
+from src.utils.config_manager import get_config_manager
 
 
 def slug_from_filename(filename):
@@ -32,10 +33,16 @@ def main():
     # Determina la cartella di output e lo slug dominio
     input_path = Path(input_excel)
     output_dir = input_path.parent
-    domain_slug = slug_from_filename(input_excel)
+    domain_slug = "nortbeachwear_com"
 
     # Setup OutputManager per questa run
-    output_manager = OutputManager(base_dir=output_dir, domain=domain_slug, create_dirs=True)
+    config_manager = get_config_manager()
+    base_urls = config_manager.get_list("BASE_URLS")
+    real_domain = base_urls[0] if base_urls else domain_slug
+    if not real_domain:
+        raise ValueError("No BASE_URLS configured in config.json")
+    domain_slug = config_manager.domain_to_slug(real_domain)
+    output_manager = OutputManager(base_dir=output_dir, domain=real_domain, create_dirs=True)
 
     # Setup logging su file e console
     log_file = output_manager.get_path('logs', f'standalone_analysis_{domain_slug}.log')

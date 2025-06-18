@@ -23,7 +23,8 @@ class OutputManager:
         config: Optional[Dict[str, Any]] = None
     ):
         """Initialize the output manager with domain-specific structure."""
-        # Usa sempre OUTPUT_ROOT come base_dir di default
+        if not domain:
+            raise ValueError("Domain must be provided to OutputManager. No fallback to 'generic' is allowed.")
         self.base_dir = Path(base_dir) if base_dir else Path(OUTPUT_ROOT)
         self.domain = domain
         
@@ -31,7 +32,7 @@ class OutputManager:
         self.timestamp = timestamp or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
         # Usa 'generic' come slug se domain è None
-        self.domain_slug = self._create_safe_slug(domain) if domain else "generic"
+        self.domain_slug = self._create_safe_slug(domain)
         
         # Standard directory structure for all domains
         self.structure = {
@@ -197,27 +198,43 @@ class OutputManager:
             self.logger.error(f"Error writing file {path}: {e}")
             return False
 
-    def ensure_path_exists(self, component: str, filename: Optional[str] = None) -> Path:
+    def ensure_path_exists(self, component: str, *subpaths) -> Path:
         """
-        Ensure a path exists, creating any necessary directories.
+        Ensure a path exists for a component with optional subpaths.
         
         Args:
-            component: Component name to get base path
-            filename: Optional filename to append
-            
+            component: Component name (e.g., 'crawler', 'axe', 'reports')
+            *subpaths: Additional path elements to append
+        
         Returns:
-            Path that is guaranteed to exist
+            Path: The full path that was created
         """
-        if filename is None:
-            # If no filename, ensure the directory itself exists
-            path = self.get_path(component)
+        try:
+            if component not in self.structure:
+                # Create a dynamic path based on base structure
+                base_path = self.structure.get("root", self.base_dir / self.domain_slug)
+                path = base_path / component
+            else:
+                path = self.structure[component]
+            
+            # Add any additional subpaths
+            if subpaths:
+                valid_subpaths = [str(subpath) for subpath in subpaths if subpath is not None]
+                if valid_subpaths:
+                    path = path.joinpath(*valid_subpaths)
+            
+            # Create the directory
             path.mkdir(parents=True, exist_ok=True)
-        else:
-            # If a filename is included, ensure the parent directory exists
-            path = self.get_path(component, filename)
-            path.parent.mkdir(parents=True, exist_ok=True)
-                
-        return path
+            self.logger.debug(f"Ensured path exists: {path}")
+            
+            return path
+            
+        except Exception as e:
+            self.logger.error(f"Error ensuring path exists for {component}: {e}")
+            # Fallback to creating just the component directory
+            fallback_path = self.structure.get(component, self.base_dir / self.domain_slug / component)
+            fallback_path.mkdir(parents=True, exist_ok=True)
+            return fallback_path
     
     def ensure_nested_path_exists(self, component: str, *subpaths) -> Path:
         """
@@ -260,55 +277,26 @@ class OutputManager:
         """
         Ottiene il percorso del file di stato del crawler, controllando più posizioni possibili.
         Implementa una ricerca gerarchica per trovare il file anche se si trova in posizioni alternative.
-        
-        Args:
-            domain_suffix: Eventuale suffisso del dominio per il nome del file
-            
-        Returns:
-            Path al file di stato del crawler trovato o il percorso predefinito se non trovato
         """
-        # Estrai il dominio di base dalla URL completa
+        # Path standard
+        main_path = self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl")
+        if main_path.exists():
+            return main_path
+        # Fallback legacy
         basic_domain = self.domain.replace("http://", "").replace("https://", "").replace("www.", "")
-        basic_domain = basic_domain.split('/')[0]  # Solo la parte del dominio
-        
-        # Lista di possibili percorsi da controllare in ordine di priorità
+        basic_domain = basic_domain.split('/')[0]
         possible_paths = [
-            # Formato standard per il file di stato
-            self.get_path("crawler", f"crawler_state_{self.domain_slug}.pkl"),
-            
-            # Formato alternativo usato dal multi_domain_crawler
-            self.get_path("crawler", f"{basic_domain}/crawler_state_{basic_domain}.pkl"),
-            
-            # Format with domain as subdirectory 
-            self.get_path("crawler") / basic_domain / f"crawler_state_{basic_domain}.pkl",
-            
-            # Usando solo il dominio di base senza slug
             self.get_path("crawler", f"crawler_state_{basic_domain}.pkl"),
-            
-            # Formato con dominio come slug nella directory principale
+            self.get_path("crawler") / basic_domain / f"crawler_state_{basic_domain}.pkl",
             self.get_path("root") / "crawler_output" / f"crawler_state_{self.domain_slug}.pkl",
-            
-            # Vecchio formato nel percorso root
             self.base_dir / f"crawler_state_{basic_domain}.pkl"
         ]
-        
-        # Cerca in tutte le posizioni possibili, tornando il primo file trovato
         for path in possible_paths:
             if path.exists():
-                self.logger.info(f"Trovato file di stato crawler: {path}")
+                self.logger.info(f"Trovato file di stato crawler legacy: {path}")
                 return path
-        
-        # Cerca file che corrispondono a pattern simili in caso di varianti nel nome
-        crawler_dir = self.get_path("crawler")
-        if crawler_dir.exists():
-            for file in crawler_dir.glob("crawler_state_*.pkl"):
-                self.logger.info(f"Trovato file di stato crawler alternativo: {file}")
-                return file
-        
-        # Se nessun file esiste, usa il path primario come default
-        default_path = possible_paths[0]
-        self.logger.warning(f"Nessun file di stato crawler trovato, verrà usato: {default_path}")
-        return default_path
+        self.logger.warning(f"Nessun file di stato crawler trovato, verrà usato: {main_path}")
+        return main_path
 
     def get_axe_report_path(self) -> Path:
         """

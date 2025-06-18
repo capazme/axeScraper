@@ -40,9 +40,13 @@ from utils.output_manager import OutputManager
 
 # Initialize configuration manager
 config_manager = ConfigurationManager(project_name="axeScraper")
+base_urls = config_manager.get_list("BASE_URLS")
+real_domain = base_urls[0] if base_urls else None
+if not real_domain:
+    raise ValueError("No BASE_URLS configured in config.json")
 
-# Set up logger without output manager initially
-logger = get_logger("axe_analysis", config_manager.get_logging_config()["components"]["axe_analysis"])
+# Sostituisci logger = get_logger(...) con logger = get_logger(..., domain=real_domain)
+logger = get_logger("axe_analysis", config_manager.get_logging_config()["components"]["axe_analysis"], domain=real_domain)
 
 # Auto-save interval
 AUTO_SAVE_INTERVAL = config_manager.get_int("CRAWLER_SAVE_INTERVAL", 5)
@@ -427,11 +431,12 @@ class AxeAnalysis:
         # Use output manager if provided
         self.output_manager = output_manager
         
-                # Update logger with output manager if available
+        # Update logger with output manager if available
         logger = get_logger(
             "axe_analysis",
             config_manager.get_logging_config()["components"]["axe_analysis"],
-            output_manager=output_manager
+            output_manager=output_manager,
+            domain=real_domain
         )
         
         # Use configuration manager for defaults
@@ -500,7 +505,8 @@ class AxeAnalysis:
         logger = get_logger(
             "axe_analysis", 
             config_manager.get_logging_config()["components"]["axe_analysis"],
-            output_manager=output_manager
+            output_manager=output_manager,
+            domain=real_domain
         )
 
     def _load_visited(self) -> None:
@@ -691,13 +697,41 @@ class AxeAnalysis:
         if not self.results:
             logger.warning("No results to export.")
             return
-            
+        
+        # --- NEW: Load template mapping if possible ---
+        template_mapping = {}
+        normalize_url = None
+        try:
+            from analysis.report_analysis import AccessibilityAnalyzer
+            normalize_url = AccessibilityAnalyzer().normalize_url
+        except Exception:
+            def normalize_url(url):
+                return url.lower().rstrip('/') if isinstance(url, str) else url
+        if self.output_manager:
+            state_path = self.output_manager.get_crawler_state_path()
+            if state_path and state_path.exists():
+                try:
+                    import pickle
+                    with open(state_path, 'rb') as f:
+                        state = pickle.load(f)
+                    if 'structures' in state:
+                        for template, data in state['structures'].items():
+                            for url in data.get('urls', []):
+                                template_mapping[normalize_url(url)] = template
+                    elif 'domain_data' in state:
+                        for domain, data in state['domain_data'].items():
+                            for template, tdata in data.get('structures', {}).items():
+                                for url in tdata.get('urls', []):
+                                    template_mapping[normalize_url(url)] = template
+                except Exception as e:
+                    logger.warning(f"Could not load template mapping from crawler state: {e}")
+        
         # Support both string and Path objects for excel_filename
         if isinstance(self.excel_filename, str):
             excel_path = Path(self.excel_filename)
         else:
             excel_path = self.excel_filename
-            
+        
         # Ensure parent directory exists
         if not excel_path.parent.exists():
             try:
@@ -711,51 +745,44 @@ class AxeAnalysis:
             
             with pd.ExcelWriter(str(excel_path), engine="openpyxl") as writer:
                 for url, issues in self.results.items():
-                    # Extract domain and path for sheet name
+                    # MODIFICATO: Nomi sheet più descrittivi
                     parsed = urlparse(url)
                     domain = parsed.netloc.replace("www.", "")
-                    
-                    # Extract the last segment of the path for the sheet name
                     path = parsed.path.rstrip('/')
-                    if path:
+                    if path and path != '/':
                         last_segment = path.split('/')[-1]
                     else:
                         last_segment = "home"
-                    
-                    # Create base sheet name
-                    base_name = f"{domain}_{last_segment}"
-                    base_name = re.sub(r'[\\/*?:\[\]]', '_', base_name)[:28]  # Leave room for a number
-                    
-                    # Handle duplicates by adding a counter
+                    base_name = f"{domain[:15]}_{last_segment}"
+                    base_name = re.sub(r'[\\/*?:\[\]]', '_', base_name)[:28]
                     if base_name in sheet_counter:
                         sheet_counter[base_name] += 1
                         sheet_name = f"{base_name}_{sheet_counter[base_name]}"
                     else:
                         sheet_counter[base_name] = 1
                         sheet_name = base_name
-                    
-                    # Limit to 31 characters (Excel max)
                     sheet_name = sheet_name[:31]
-                    
                     df = pd.DataFrame(issues) if issues else pd.DataFrame(columns=[
                         "page_url", "violation_id", "impact", "description",
                         "help", "target", "html", "failure_summary"
                     ])
-                    
-                    # Add URL to first row if missing
+                    # --- NEW: Add template column ---
+                    if not df.empty:
+                        if 'template' not in df.columns:
+                            # Try to map by normalized page_url
+                            df['template'] = df['page_url'].apply(normalize_url).map(template_mapping).fillna('Unknown')
+                    else:
+                        df['template'] = 'Unknown'
+                    # Add URL to first row if no issues are found, for context
                     if df.empty:
                         df = pd.DataFrame([{"page_url": url, "violation_id": "N/A", 
-                                          "impact": "N/A", "description": "No issues detected"}])
-                    
+                                          "impact": "N/A", "description": "No issues detected on this page.", "template": template_mapping.get(normalize_url(url), 'Unknown')}])
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
                     logger.debug(f"Sheet '{sheet_name}' created for {url}")
-            
             # Rename headers to make them more readable
             rename_headers(str(excel_path), str(excel_path))
-            
             logger.info(f"Excel report generated: '{excel_path}'")
             logger.info(f"Contains {len(self.results)} sheets, one for each representative URL analyzed")
-            
         except Exception as e:
             logger.exception(f"Error generating Excel report: {e}")
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Middleware di retry avanzato con supporto per fallback a Selenium.
+Middleware di retry avanzato con supporto migliorato per fallback a Selenium.
 """
 
 import logging
@@ -8,7 +8,7 @@ import time
 import random
 from urllib.parse import urlparse
 
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from twisted.internet.error import (
     TimeoutError, DNSLookupError, ConnectionRefusedError,
     ConnectionDone, ConnectError, ConnectionLost
@@ -34,12 +34,13 @@ class CustomRetryMiddleware:
     EXCEPTIONS_TO_RETRY = (
         TimeoutError, DNSLookupError, ConnectionRefusedError,
         ConnectionDone, ConnectError, ConnectionLost,
-        ResponseFailed, TunnelError
+        ResponseFailed, TunnelError,
+        AttributeError  # Aggiunto per gestire gli AttributeError
     )
     
     # Errori che potrebbero richiedere Selenium
     JS_FALLBACK_ERRORS = (
-        TimeoutError, ResponseFailed
+        TimeoutError, ResponseFailed, AttributeError
     )
     
     def __init__(self, settings):
@@ -126,14 +127,29 @@ class CustomRetryMiddleware:
             # Attesa più lunga prima di ritentare
             self.logger.warning(f"429 Too Many Requests: {request.url}")
             retry_after = response.headers.get('Retry-After')
-            delay = float(retry_after) if retry_after else self.retry_delay * 4
-            return self._retry(request, response.status, spider, force_delay=delay) or response
+            if retry_after:
+                try:
+                    delay = float(retry_after.decode('utf-8'))
+                except:
+                    delay = self.retry_delay * 4
+            else:
+                delay = self.retry_delay * 4
+            
+            # Sempre tentare con Selenium per 429
+            if self.try_selenium_fallback and not request.meta.get('selenium'):
+                self.logger.info(f"Tentativo fallback a Selenium per 429: {request.url}")
+                return self._retry_with_selenium(request, spider, force_delay=delay) or response
+            else:
+                return self._retry(request, response.status, spider, force_delay=delay) or response
             
         elif response.status == 503:  # Service Unavailable
             # Potrebbe avere header Retry-After
             retry_after = response.headers.get('Retry-After')
             if retry_after:
-                delay = float(retry_after)
+                try:
+                    delay = float(retry_after.decode('utf-8'))
+                except:
+                    delay = self.retry_delay * 2
                 self.logger.info(f"503 Service Unavailable, retry after {delay}s: {request.url}")
                 return self._retry(request, response.status, spider, force_delay=delay) or response
         
@@ -155,10 +171,18 @@ class CustomRetryMiddleware:
         if request.meta.get('dont_retry', False):
             return None
             
+        # Log dell'eccezione per debug
+        self.logger.debug(f"Exception {type(exception).__name__} for {request.url}: {str(exception)}")
+        
         # Controlla se è un'eccezione da ritentare
         retry_exc = isinstance(exception, self.EXCEPTIONS_TO_RETRY)
         
         if retry_exc:
+            # Per AttributeError, sempre tentare con Selenium
+            if isinstance(exception, AttributeError) and self.try_selenium_fallback and not request.meta.get('selenium'):
+                self.logger.info(f"AttributeError - tentativo fallback a Selenium per: {request.url}")
+                return self._retry_with_selenium(request, spider)
+            
             # Controlla se potrebbe richiedere Selenium
             if (self.try_selenium_fallback and 
                     isinstance(exception, self.JS_FALLBACK_ERRORS) and 
@@ -175,130 +199,120 @@ class CustomRetryMiddleware:
         
         Args:
             request (Request): Richiesta da ritentare
-            reason (int or Exception, optional): Motivo del retry
-            spider (Spider, optional): Spider in esecuzione
-            force_delay (float, optional): Delay forzato per il retry
-            exception (Exception, optional): Eccezione catturata
+            reason: Motivo del retry (status code o exception)
+            spider (Spider): Spider in esecuzione
+            force_delay (float): Ritardo forzato
+            exception (Exception): Eccezione sollevata
+            
         Returns:
-            Request or None: Nuova richiesta o None se non si ritenta
+            Request or None: Nuova richiesta o None se limite raggiunto
         """
-        retry_times = request.meta.get('retry_times', 0) + 1
-
-        # Se troppi tentativi, non ritentare più
-        if retry_times > self.max_retry_times:
-            self.logger.debug(f"Raggiunto numero massimo di tentativi ({self.max_retry_times}) per {request.url}")
-            if reason and self.stats:
-                self.stats.inc_value(f"retry/max_reached/{reason}")
+        retries = request.meta.get('retry_times', 0) + 1
+        
+        if retries > self.max_retry_times:
+            self.logger.warning(f"Raggiunto numero massimo di tentativi ({self.max_retry_times}) per {request.url}")
+            if self.stats:
+                reason_key = f'retry/max_reached/{reason}' if reason else 'retry/max_reached'
+                self.stats.inc_value(reason_key)
             return None
-
-        # Log e statistiche
-        reason_str = str(reason) if reason else "unknown"
-        domain = urlparse(request.url).netloc
-
-        if self.stats:
-            self.stats.inc_value("retry/count")
-            self.stats.inc_value(f"retry/reason/{reason_str}")
-            self.stats.inc_value(f"retry/domain/{domain}")
-            self.stats.inc_value(f"retry/attempt/{retry_times}")
-
-        # Calcola ritardo con backoff esponenziale
+        
+        # Calcola il ritardo
         if force_delay is not None:
-            delay = min(force_delay, self.retry_delay_max)
+            delay = force_delay
         else:
-            delay = min(self.retry_delay * (2 ** (retry_times - 1)), self.retry_delay_max)
-
-        # Aggiungi jitter per evitare thundering herd
+            delay = min(self.retry_delay * (2 ** (retries - 1)), self.retry_delay_max)
+        
         if self.retry_jitter:
-            import random
-            delay = delay * (random.uniform(0.5, 1.5))
-
-        self.logger.debug(f"Ritentativo {retry_times}/{self.max_retry_times} per {request.url} in {delay:.2f}s")
-
-        # Ritarda la richiesta
-        request.meta['retry_times'] = retry_times
-        request.meta['retry_delay'] = delay
-        request.meta['retry_reason'] = reason_str
-        request.dont_filter = True
-        request.priority = request.priority + self.priority_adjust
-
-        # Usa callLater per il ritardo
-        from twisted.internet import defer, reactor
+            delay = delay * random.uniform(0.7, 1.3)
+        
+        # Statistiche
+        if self.stats:
+            self.stats.inc_value('retry/count')
+            self.stats.inc_value(f'retry/attempt/{retries}')
+            if reason:
+                self.stats.inc_value(f'retry/reason/{reason}')
+            domain = urlparse(request.url).netloc
+            if domain:
+                self.stats.inc_value(f'retry/domain/{domain}')
+        
+        self.logger.info(f"Retry {retries}/{self.max_retry_times} per {request.url} "
+                        f"(motivo: {reason or exception}) in {delay:.2f}s")
+        
+        # Crea nuova richiesta
+        new_request = request.copy()
+        new_request.meta['retry_times'] = retries
+        new_request.priority = request.priority + self.priority_adjust
+        new_request.dont_filter = True
+        
+        # Usa Deferred per il ritardo
         deferred = defer.Deferred()
-        reactor.callLater(delay, lambda: deferred.callback(request))
+        reactor.callLater(delay, lambda: deferred.callback(new_request))
         return deferred
-
-    def _retry_with_selenium(self, request, spider):
+    
+    def _retry_with_selenium(self, request, spider, force_delay=None):
         """
         Ritenta una richiesta usando Selenium.
         
         Args:
             request (Request): Richiesta da ritentare
             spider (Spider): Spider in esecuzione
+            force_delay (float): Ritardo forzato prima del retry
             
         Returns:
             Request or None: Nuova richiesta o None se non si ritenta
         """
         # Verifica se lo spider supporta la modalità ibrida
         if not hasattr(spider, 'hybrid_mode') or not spider.hybrid_mode:
-            return self._retry(request, reason="fallback_selenium", spider=spider)
-            
+            return self._retry(request, reason="no_selenium_support", spider=spider)
+        
+        # Verifica se abbiamo già tentato con Selenium
+        if request.meta.get('selenium'):
+            self.logger.debug(f"Già tentato con Selenium per {request.url}")
+            return self._retry(request, reason="selenium_failed", spider=spider)
+        
+        # Verifica se lo spider ha il metodo make_selenium_request
+        if not hasattr(spider, 'make_selenium_request'):
+            self.logger.warning(f"Spider non ha metodo make_selenium_request")
+            return self._retry(request, reason="no_selenium_method", spider=spider)
+        
         try:
-            from scrapy_selenium import SeleniumRequest
-            
             # Statistiche per i fallback
             if self.stats:
                 self.stats.inc_value("retry/selenium_fallback")
-                
-            # Copia meta dalla richiesta originale
-            meta = dict(request.meta)
-            meta['selenium'] = True
-            meta['retry_times'] = meta.get('retry_times', 0) + 1
-            meta['retry_reason'] = "fallback_selenium"
             
-            # Crea la richiesta SeleniumRequest
-            selenium_request = SeleniumRequest(
-                url=request.url,
-                callback=request.callback,
-                errback=request.errback,
-                wait_time=3,  # Attesa per il rendering JS
-                meta=meta,
-                headers=request.headers,
-                dont_filter=True,
-                priority=request.priority + self.priority_adjust,
-                script="""
-                    // Gestisce popup e bottoni comuni
-                    try {
-                        // Click su pulsanti di accettazione cookie
-                        var acceptBtns = document.querySelectorAll("button:contains('Accetta'), button:contains('Accetto'), button:contains('Accept'), button:contains('I agree'), [id*='cookie'] button, [class*='cookie'] button");
-                        for (var i = 0; i < acceptBtns.length; i++) {
-                            if (acceptBtns[i].offsetParent !== null) {
-                                acceptBtns[i].click();
-                                break;
-                            }
-                        }
-                        
-                        // Scorrimento pagina
-                        window.scrollTo(0, document.body.scrollHeight / 2);
-                    } catch(e) {
-                        console.error('Error in Selenium script:', e);
-                    }
-                """
-            )
+            # Calcola ritardo
+            if force_delay is not None:
+                delay = force_delay
+            else:
+                delay = self.retry_delay * 2
             
-            # Ritardo prima del retry
-            delay = self.retry_delay * 2
             if self.retry_jitter:
-                import random
-                delay = delay * (random.uniform(0.7, 1.3))
-                
+                delay = delay * random.uniform(0.7, 1.3)
+            
             self.logger.info(f"Fallback a Selenium per {request.url} in {delay:.2f}s")
             
-            # Usa callLater per il ritardo
-            from twisted.internet import defer, reactor
-            deferred = defer.Deferred()
-            reactor.callLater(delay, lambda: deferred.callback(selenium_request))
-            return deferred
+            # Crea richiesta Selenium tramite lo spider
+            selenium_request = spider.make_selenium_request(
+                request.url,
+                request.callback or spider.parse,
+                referer=request.meta.get('referer'),
+                depth=request.meta.get('depth', 0)
+            )
             
-        except (ImportError, Exception) as e:
+            if selenium_request:
+                # Copia metadati importanti
+                selenium_request.meta['retry_times'] = request.meta.get('retry_times', 0) + 1
+                selenium_request.meta['retry_reason'] = "fallback_selenium"
+                selenium_request.priority = request.priority + self.priority_adjust
+                
+                # Usa Deferred per il ritardo
+                deferred = defer.Deferred()
+                reactor.callLater(delay, lambda: deferred.callback(selenium_request))
+                return deferred
+            else:
+                self.logger.error(f"Impossibile creare richiesta Selenium per {request.url}")
+                return None
+            
+        except Exception as e:
             self.logger.error(f"Errore creando richiesta Selenium fallback: {e}")
             return self._retry(request, reason="selenium_error", spider=spider)

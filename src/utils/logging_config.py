@@ -83,39 +83,29 @@ def setup_logging(
     
     return logger
 
-def get_logger(component_name, log_config=None, output_manager=None, domain_slug=None):
+def get_logger(component_name, log_config=None, output_manager=None, domain=None):
     """Get properly configured logger with file output."""
-    # Use component_name as a cache key to avoid duplicate loggers
     logger = logging.getLogger(component_name)
-    
-    # If this logger is already configured, return it
     if logger.handlers:
         return logger
-        
-    # Prevent propagation to parent loggers to avoid duplication
     logger.propagate = False
-    
-    # Default log configuration
     log_level = "INFO"
     log_file = f"{component_name}.log"
-    
-    # Get component-specific configuration if available
     if log_config:
         log_level = log_config.get("level", log_level)
         log_file = log_config.get("log_file", log_file)
-    
-    # Determine log directory - create it explicitly
-    log_dir = OutputManager(domain=domain_slug).get_path('logs')  # Usa lo slug se disponibile
-    
+    # Determina la directory dei log
     if output_manager:
         try:
-            # Explicitly ensure log directory exists
             log_dir = output_manager.ensure_log_path_exists(component_name)
             print(f"Using output_manager log path for {component_name}: {log_dir}")
         except Exception as e:
             print(f"Error getting log path from output_manager: {e}")
-    
-    # Set up logging with explicit path creation
+            raise
+    elif domain:
+        log_dir = OutputManager(base_dir=OUTPUT_ROOT, domain=domain).get_path('logs')
+    else:
+        raise ValueError("A real domain must be provided to OutputManager for logging.")
     return setup_logging(
         log_level=log_level,
         log_dir=log_dir,

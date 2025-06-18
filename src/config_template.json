@@ -1,0 +1,56 @@
+{
+  // --- CRAWLER CONFIG ---
+  "CRAWLER_MAX_URLS": 100,                // Numero massimo di URL per dominio
+  "CRAWLER_MAX_TOTAL_URLS": 1000,         // Numero massimo totale di URL da processare
+  "CRAWLER_DEPTH_LIMIT": 5,               // Profondità massima di crawling
+  "CRAWLER_HYBRID_MODE": true,            // Abilita modalità ibrida (Selenium + HTTP)
+  "CRAWLER_PENDING_THRESHOLD": 30,        // Soglia per passare da Selenium a HTTP
+  "CRAWLER_REQUEST_DELAY": 0.5,           // Ritardo tra richieste (secondi)
+  "CRAWLER_MAX_WORKERS": 16,              // Numero massimo di worker concorrenti
+
+  // --- DOMAINS & URLS ---
+  "BASE_URLS": [
+    "https://www.example.com/"
+  ],
+  "OUTPUT_DIR": "~/axeScraper/output",   // Directory di output principale
+
+  // --- PIPELINE CONFIG ---
+  "PIPELINE_KEEP_HTML": false,             // Conserva l'HTML completo nelle pagine
+  "PIPELINE_REPORT_FORMAT": "all",       // Formato report: all, markdown, json, csv
+  "PIPELINE_SAVE_INTERVAL": 50,           // Ogni quanti item salvare lo stato
+  "PIPELINE_FLUSH_INTERVAL": 10,          // Ogni quanti item fare flush su disco
+
+  // --- AXE/ANALYSIS CONFIG ---
+  "AXE_MAX_TEMPLATES": 50,                // Numero massimo di template da analizzare
+  "AXE_POOL_SIZE": 5,                     // Pool di driver Selenium
+  "AXE_SLEEP_TIME": 1.0,                  // Attesa tra richieste Axe
+  "AXE_HEADLESS": true,                   // Modalità headless Selenium
+  "AXE_RESUME": true,                     // Riprendi analisi interrotta
+
+  // --- PIPELINE STAGE ---
+  "START_STAGE": "crawler",              // Stadio iniziale: crawler, axe, analysis
+  "REPEAT_ANALYSIS": 1,                   // Quante volte ripetere l'analisi
+
+  // --- PROGRESS MONITOR ---
+  "PROGRESS_LOG_INTERVAL": 5,              // Ogni quanti secondi aggiornare la barra
+  "PROGRESS_SHOW_ETA": true,               // Mostra ETA nella barra di progresso
+  "PROGRESS_SHOW_DOMAINS": true,           // Mostra statistiche per dominio
+  "PROGRESS_SHOW_SPEED": true,             // Mostra velocità di crawling
+
+  // --- STATS COLLECTOR ---
+  "STATS_SPEED_INTERVAL": 30,              // Intervallo (s) per calcolo velocità
+  "STATS_SPEED_WINDOW_SIZE": 10,           // Finestra per media velocità
+
+  // --- AUTENTICAZIONE (opzionale) ---
+  "AUTH_BASIC_USERNAME": "",              // Username HTTP Basic Auth
+  "AUTH_BASIC_PASSWORD": "",              // Password HTTP Basic Auth
+
+  // --- EMAIL (opzionale) ---
+  "EMAIL_ENABLED": false,                   // Abilita invio email
+  "EMAIL_SMTP_HOST": "smtp.example.com",  // Host SMTP
+  "EMAIL_SMTP_PORT": 587,                  // Porta SMTP
+  "EMAIL_SMTP_USER": "user@example.com",  // Utente SMTP
+  "EMAIL_SMTP_PASSWORD": "password",      // Password SMTP
+  "EMAIL_FROM": "noreply@example.com",    // Mittente
+  "EMAIL_TO": ["admin@example.com"]        // Destinatari
+} 

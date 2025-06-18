@@ -74,82 +74,140 @@ IMPACT_WEIGHTS = {
     'unknown': 0
 }
 
-# Note: Matching WCAG using 'in' can be imprecise if IDs overlap.
-# Consider exact matches or prioritizing longer keys if needed.
 WCAG_CATEGORIES = {
-    'color-contrast': {'category': 'Perceivable', 'criterion': '1.4.3', 'name': 'Contrast (Minimum)'},
-    'aria-roles': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
-    'keyboard': {'category': 'Operable', 'criterion': '2.1.1', 'name': 'Keyboard'},
-    'document-title': {'category': 'Perceivable', 'criterion': '2.4.2', 'name': 'Page Titled'},
+    # --- Principio 1: Perceivable ---
     'image-alt': {'category': 'Perceivable', 'criterion': '1.1.1', 'name': 'Non-text Content'},
-    'label': {'category': 'Perceivable', 'criterion': '1.3.1', 'name': 'Info and Relationships'},
-    'link-name': {'category': 'Perceivable', 'criterion': '2.4.4', 'name': 'Link Purpose (In Context)'},
     'list': {'category': 'Perceivable', 'criterion': '1.3.1', 'name': 'Info and Relationships'},
-    'heading-order': {'category': 'Perceivable', 'criterion': '2.4.6', 'name': 'Headings and Labels'},
-    'frame-title': {'category': 'Perceivable', 'criterion': '2.4.1', 'name': 'Bypass Blocks'},
-    'html-has-lang': {'category': 'Perceivable', 'criterion': '3.1.1', 'name': 'Language of Page'},
-    'html-lang-valid': {'category': 'Perceivable', 'criterion': '3.1.1', 'name': 'Language of Page'},
+    'heading-order': {'category': 'Perceivable', 'criterion': '1.3.1', 'name': 'Info and Relationships'},
+    'color-contrast': {'category': 'Perceivable', 'criterion': '1.4.3', 'name': 'Contrast (Minimum)'},
+    'meta-viewport': {'category': 'Perceivable', 'criterion': '1.4.4', 'name': 'Resize text'},
+    'reflow': {'category': 'Perceivable', 'criterion': '1.4.10', 'name': 'Reflow'},
+    'non-text-contrast': {'category': 'Perceivable', 'criterion': '1.4.11', 'name': 'Non-text Contrast'},
+
+    # --- Principio 2: Operable ---
+    'keyboard': {'category': 'Operable', 'criterion': '2.1.1', 'name': 'Keyboard'},
+    'bypass': {'category': 'Operable', 'criterion': '2.4.1', 'name': 'Bypass Blocks'},
+    'document-title': {'category': 'Operable', 'criterion': '2.4.2', 'name': 'Page Titled'},
+    'link-name': {'category': 'Operable', 'criterion': '2.4.4', 'name': 'Link Purpose (In Context)'},
+    'empty-heading': {'category': 'Operable', 'criterion': '2.4.6', 'name': 'Headings and Labels'},
+    'focus-visible': {'category': 'Operable', 'criterion': '2.4.7', 'name': 'Focus Visible'},
+    'target-size': {'category': 'Operable', 'criterion': '2.5.8', 'name': 'Target Size (Minimum)'},
+
+    # --- Principio 3: Understandable ---
+    'html-has-lang': {'category': 'Understandable', 'criterion': '3.1.1', 'name': 'Language of Page'},
+    'html-lang-valid': {'category': 'Understandable', 'criterion': '3.1.2', 'name': 'Language of Parts'},
+    'label': {'category': 'Understandable', 'criterion': '3.3.2', 'name': 'Labels or Instructions'},
+    'form-field-multiple-labels': {'category': 'Understandable', 'criterion': '3.3.2', 'name': 'Labels or Instructions'},
+
+    # --- Principio 4: Robust ---
+    'aria-roles': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
     'aria-allowed-attr': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
-    'aria-required-attr': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
+    'button-name': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
+    'frame-title': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
     'aria-required-children': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
     'aria-required-parent': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
-    'form-field-multiple-labels': {'category': 'Perceivable', 'criterion': '3.3.2', 'name': 'Labels or Instructions'},
-    'button-name': {'category': 'Operable', 'criterion': '2.4.4', 'name': 'Link Purpose (In Context)'},
-    'duplicate-id': {'category': 'Robust', 'criterion': '4.1.1', 'name': 'Parsing'},
-    'empty-heading': {'category': 'Perceivable', 'criterion': '2.4.6', 'name': 'Headings and Labels'},
+
+    # NOTA: il criterio 4.1.1 Parsing è obsoleto in WCAG 2.2.
+    # Errori come ID duplicati ora violano il 4.1.2 perché impediscono
+    # la determinazione univoca del nome/ruolo/valore di un elemento.
+    'duplicate-id-active': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
+    'duplicate-id-aria': {'category': 'Robust', 'criterion': '4.1.2', 'name': 'Name, Role, Value'},
+    
+    'status-messages': {'category': 'Robust', 'criterion': '4.1.3', 'name': 'Status Messages'},
 }
 
 SOLUTION_MAPPING = {
-    'color-contrast': {
-        'description': 'Increase contrast ratio to at least 4.5:1 for normal text or 3:1 for large text',
-        'technical': 'Use CSS to adjust text and background colors; verify with a contrast checker tool',
-        'impact': 'Affects users with low vision, color blindness, or reading on mobile in bright light'
-    },
-    'aria-roles': {
-        'description': 'Use valid ARIA role values according to specifications',
-        'technical': 'Check ARIA roles against WAI-ARIA specification; remove invalid roles',
-        'impact': 'Affects screen reader users who rely on correct role semantics'
-    },
-    'image-alt': {
-        'description': 'Add descriptive alt text to images',
-        'technical': 'Use the alt attribute on all <img> elements with meaningful descriptions',
-        'impact': 'Affects screen reader users who cannot see images'
-    },
-    'document-title': {
-        'description': 'Add an appropriate title tag in the document head',
-        'technical': 'Ensure <title> element exists in <head> with a descriptive page title',
-        'impact': 'Affects all users for page identification, especially screen reader users'
-    },
-    'label': {
-        'description': 'Associate form controls with proper labels',
-        'technical': 'Use <label> with for attribute, or aria-labelledby, or aria-label',
-        'impact': 'Affects screen reader users and voice recognition software users'
-    },
-    'link-name': {
-        'description': 'Ensure links have accessible text content',
-        'technical': 'Add text within the <a> element or use aria-label/aria-labelledby',
-        'impact': 'Affects screen reader users who need to understand link purpose'
-    },
-    'frame-title': {
-        'description': 'Add title attribute to iframe elements',
-        'technical': 'Add descriptive title attribute to all <iframe> elements',
-        'impact': 'Affects screen reader users who need context for frame content'
-    },
-    'keyboard': {
-        'description': 'Make all interactive elements keyboard accessible',
-        'technical': 'Ensure all interactions can be accessed with Tab, Enter, Space, Escape keys',
-        'impact': 'Affects keyboard-only users, including many with motor disabilities'
-    },
-    'html-has-lang': {
-        'description': 'Add a lang attribute to the HTML element',
-        'technical': 'Add lang="xx" to the <html> element with the appropriate language code',
-        'impact': 'Affects screen readers that need language information for proper pronunciation'
-    },
-    'button-name': {
-        'description': 'Provide accessible names for all buttons',
-        'technical': 'Add text content to <button> elements or use aria-label/aria-labelledby',
-        'impact': 'Affects screen reader users who need to understand button purpose'
-    },
+    # Perceivable
+    '1.1.1_non-text-content': {'description': 'Provide text alternatives for non-text content.', 'technical': 'Use the `alt` attribute for images. For complex images, provide a longer description nearby. For decorative images, use `alt=""`.', 'impact': 'Users of screen readers, people with slow connections, or those who have images disabled.'},
+    '1.2.1_audio-only-video-only-prerecorded': {'description': 'Provide an alternative for prerecorded audio-only and video-only media.', 'technical': 'Provide a full text transcript for audio-only content. For video-only, provide a text transcript or an audio track.', 'impact': 'Users who are deaf or hard of hearing (for audio), and users who are blind (for video).'},
+    '1.2.2_captions-prerecorded': {'description': 'Provide captions for all prerecorded audio content in synchronized media.', 'technical': 'Add a synchronized caption track (e.g., WebVTT) to all videos containing audio.', 'impact': 'Users who are deaf, hard of hearing, or watching in a noisy environment.'},
+    '1.2.3_audio-description-media-alternative-prerecorded': {'description': 'Provide audio description or a full text alternative for prerecorded video content.', 'technical': 'Add a synchronized audio description track or provide a detailed text transcript that includes all visual information.', 'impact': 'Users who are blind or have low vision.'},
+    '1.2.4_captions-live': {'description': 'Provide captions for all live audio content in synchronized media.', 'technical': 'Use real-time captioning services (e.g., CART) for live streams and webcasts.', 'impact': 'Users who are deaf or hard of hearing participating in live events.'},
+    '1.2.5_audio-description-prerecorded': {'description': 'Provide audio description for all prerecorded video content.', 'technical': 'Add a synchronized audio description track to all videos.', 'impact': 'Users who are blind or have low vision.'},
+    '1.2.6_sign-language-prerecorded': {'description': 'Provide sign language interpretation for all prerecorded audio content.', 'technical': 'Embed a video of a sign language interpreter into the main video content.', 'impact': 'Users whose primary language is sign language.'},
+    '1.2.7_extended-audio-description-prerecorded': {'description': 'Provide extended audio descriptions where pauses in video are insufficient.', 'technical': 'When needed, pause the video to allow for a longer, more detailed audio description to be delivered.', 'impact': 'Users who are blind, for understanding complex visual scenes.'},
+    '1.2.8_media-alternative-prerecorded': {'description': 'Provide a media alternative for all prerecorded synchronized media.', 'technical': 'Provide a single document with a full text transcript, including all visual and auditory information.', 'impact': 'Users with both vision and hearing impairments.'},
+    '1.2.9_audio-only-live': {'description': 'Provide an alternative for live audio-only content.', 'technical': 'Provide a real-time text-based stream, like CART, alongside the live audio.', 'impact': 'Users who are deaf or hard of hearing.'},
+    '1.3.1_info-and-relationships': {'description': 'Ensure information, structure, and relationships conveyed through presentation are programmatically determinable.', 'technical': 'Use semantic HTML: `<h1>`-`<h6>` for headings, `<ul>`/`<ol>`/`<li>` for lists, `<table>` for data tables, `aria-roles` for custom components.', 'impact': 'Screen reader users who rely on programmatic structure to understand the page layout and relationships between elements.'},
+    '1.3.2_meaningful-sequence': {'description': 'Ensure the reading and navigation order is logical and intuitive.', 'technical': 'Structure the source code (DOM order) to match the logical flow of content. Avoid relying on CSS positioning to reorder content visually.', 'impact': 'Keyboard and screen reader users who navigate the page sequentially.'},
+    '1.3.3_sensory-characteristics': {'description': 'Do not rely solely on sensory characteristics like shape, size, or color for instructions.', 'technical': 'Provide text labels in addition to visual cues. E.g., "Press the red, circular button on the right" should be "Press the \'Submit\' button".', 'impact': 'Users who are blind or have color vision deficiencies.'},
+    '1.3.4_orientation': {'description': 'Do not restrict content to a single display orientation, such as portrait or landscape.', 'technical': 'Use responsive design techniques to ensure the layout adapts to both portrait and landscape modes. Avoid locking the orientation.', 'impact': 'Users with disabilities who have their devices mounted in a fixed orientation.'},
+    '1.3.5_identify-input-purpose': {'description': 'Programmatically identify the purpose of input fields.', 'technical': 'Use the `autocomplete` attribute on form fields with appropriate values (e.g., `autocomplete="name"`, `autocomplete="email"`).', 'impact': 'Users with cognitive disabilities who benefit from autofill, and assistive technologies that can apply custom icons or help.'},
+    '1.3.6_identify-purpose': {'description': 'Programmatically identify the purpose of UI components, icons, and regions.', 'technical': 'Use ARIA landmark roles (`<nav>`, `<main>`), ARIA attributes, or other technologies to define the purpose of regions and components.', 'impact': 'Screen reader users who can navigate by landmarks and understand the purpose of different page sections.'},
+    '1.4.1_use-of-color': {'description': 'Color is not used as the only visual means of conveying information.', 'technical': 'Supplement color cues with text, icons, or patterns. E.g., for an error field, add an icon and text message, not just a red border.', 'impact': 'Users with color vision deficiencies.'},
+    '1.4.2_audio-control': {'description': 'Provide a mechanism to control audio that plays automatically for more than 3 seconds.', 'technical': 'If audio autoplays, provide a visible and keyboard-accessible pause/stop button or volume control.', 'impact': 'Screen reader users whose screen reader audio would be obscured by the website\'s audio.'},
+    '1.4.3_contrast-minimum': {'description': 'Ensure text has sufficient color contrast against its background.', 'technical': 'Ensure text meets a 4.5:1 contrast ratio (3:1 for large text) using a color contrast checker tool.', 'impact': 'Users with low vision or color vision deficiencies.'},
+    '1.4.4_resize-text': {'description': 'Ensure text can be resized up to 200% without loss of content or functionality.', 'technical': 'Use relative units (em, rem, %) for text and container sizes. Avoid fixed-height containers for text.', 'impact': 'Users with low vision who need to magnify text to read it.'},
+    '1.4.5_images-of-text': {'description': 'Use real text instead of images of text whenever possible.', 'technical': 'Use CSS for styling text. If an image of text is unavoidable (e.g., a logo), ensure its `alt` text matches the text in the image.', 'impact': 'Users with low vision who need to resize text and customize its appearance.'},
+    '1.4.6_contrast-enhanced': {'description': 'Ensure text has a very high color contrast.', 'technical': 'Ensure text meets a 7:1 contrast ratio (4.5:1 for large text).', 'impact': 'Users with more significant low vision.'},
+    '1.4.7_low-or-no-background-audio': {'description': 'Ensure foreground speech is clearly distinguishable from background sound.', 'technical': 'Background audio should be at least 20 decibels lower than speech, or provide an option to turn it off.', 'impact': 'Users who are hard of hearing.'},
+    '1.4.8_visual-presentation': {'description': 'Provide mechanisms to control the visual presentation of blocks of text.', 'technical': 'Allow users to select foreground/background colors, set line width, adjust spacing, and resize text to 200% without horizontal scrolling.', 'impact': 'Users with low vision and cognitive disabilities like dyslexia.'},
+    '1.4.9_images-of-text-no-exception': {'description': 'Images of text are only used for pure decoration or when essential (like a logo).', 'technical': 'Strictly avoid using images of text for any informational content.', 'impact': 'Improves accessibility for all users who need to customize text presentation.'},
+    '1.4.10_reflow': {'description': 'Content can be presented without loss of information or functionality, and without requiring two-dimensional scrolling.', 'technical': 'Ensure the page reflows into a single column when zoomed to 400%. Avoid content that requires both vertical and horizontal scrolling.', 'impact': 'Users with low vision who use screen magnification.'},
+    '1.4.11_non-text-contrast': {'description': 'Ensure UI components and graphical objects have sufficient contrast.', 'technical': 'Ensure borders, icons, and state indicators (like a focus outline) have a 3:1 contrast ratio against adjacent colors.', 'impact': 'Users with low vision and color vision deficiencies.'},
+    '1.4.12_text-spacing': {'description': 'Ensure no loss of content occurs when users adjust text spacing.', 'technical': 'Build components using relative units and flexible containers so that content does not get cut off or overlap when user-defined styles are applied.', 'impact': 'Users with low vision and dyslexia who use custom stylesheets to improve readability.'},
+    '1.4.13_content-on-hover-or-focus': {'description': 'Ensure additional content shown on hover or focus is dismissible, hoverable, and persistent.', 'technical': 'Tooltips/popovers must not disappear when the user moves their mouse over them, and must be dismissible with the Esc key.', 'impact': 'Users with low vision who use magnification and might need to move their mouse to the tooltip to read it.'},
+    # Operable
+    '2.1.1_keyboard': {'description': 'All functionality is available from a keyboard.', 'technical': 'Ensure all interactive elements (links, buttons, form fields, custom widgets) can be reached and activated using the Tab, Shift+Tab, and Enter/Space keys.', 'impact': 'Users with motor disabilities who cannot use a mouse, and screen reader users.'},
+    '2.1.2_no-keyboard-trap': {'description': 'Users can navigate away from any component using only the keyboard.', 'technical': 'If a component (like a modal dialog) traps focus, provide a clear and standard way to exit (e.g., the Esc key or a close button).', 'impact': 'Keyboard-only users who would otherwise get stuck and be unable to use the rest of the page.'},
+    '2.1.3_keyboard-no-exception': {'description': 'All functionality is available from a keyboard without requiring specific timings for individual keystrokes.', 'technical': 'Avoid functionality that requires a key to be held down or pressed in a rapid sequence.', 'impact': 'Users with motor disabilities.'},
+    '2.1.4_character-key-shortcuts': {'description': 'Allow users to turn off or reconfigure single-character key shortcuts.', 'technical': 'If using shortcuts like \'s\' for search, provide a setting to disable them or require a modifier key (e.g., Ctrl+S).', 'impact': 'Users of speech recognition software who may accidentally trigger shortcuts by speaking words.'},
+    '2.2.1_timing-adjustable': {'description': 'Provide users with enough time to read and use content.', 'technical': 'For any time limits (e.g., session timeouts), provide an option to turn off, adjust, or extend the limit.', 'impact': 'Users with cognitive, motor, or reading disabilities who may need more time to complete tasks.'},
+    '2.2.2_pause-stop-hide': {'description': 'Provide controls for moving, blinking, scrolling, or auto-updating information.', 'technical': 'For carousels, animations, or tickers, provide a clear pause/stop button.', 'impact': 'Users with attention disorders or vestibular disorders who can be distracted or made ill by moving content.'},
+    '2.2.3_no-timing': {'description': 'Timing is not an essential part of the event or activity presented by the content.', 'technical': 'Avoid making tasks time-dependent unless it is for a real-time event (like an auction).', 'impact': 'All users with disabilities who may need more time.'},
+    '2.2.4_interruptions': {'description': 'Interruptions can be postponed or suppressed by the user.', 'technical': 'Avoid pop-ups or updates that interrupt the user\'s workflow, unless they are essential (e.g., an emergency alert).', 'impact': 'Users with cognitive disabilities and screen reader users who can lose their place.'},
+    '2.2.5_re-authenticating': {'description': 'Users can continue an activity after re-authenticating without loss of data.', 'technical': 'If a session expires, save the user\'s data (e.g., form entries) so it can be restored after they log back in.', 'impact': 'Users who take longer to complete tasks and may have their session time out.'},
+    '2.2.6_timeouts': {'description': 'Warn users of the duration of inactivity that could cause data loss.', 'technical': 'If data is not preserved for more than 20 hours, inform the user about the inactivity timeout.', 'impact': 'Users who may be unaware that their work will be lost after a period of inactivity.'},
+    '2.3.1_three-flashes-or-below-threshold': {'description': 'Content does not contain anything that flashes more than three times in any one-second period.', 'technical': 'Analyze videos and animations to ensure they do not contain rapid, large flashes that could trigger seizures.', 'impact': 'Users with photosensitive epilepsy.'},
+    '2.3.2_three-flashes': {'description': 'Web pages do not contain anything that flashes more than three times in any one second period.', 'technical': 'A stricter version of 2.3.1, removing the "below threshold" exception.', 'impact': 'Users with photosensitive epilepsy.'},
+    '2.3.3_animation-from-interactions': {'description': 'Motion animation triggered by interaction can be disabled.', 'technical': 'Use the `prefers-reduced-motion` CSS media query to disable or reduce non-essential animations for users who have requested it.', 'impact': 'Users with vestibular disorders who can be made ill by parallax scrolling or other motion effects.'},
+    '2.4.1_bypass-blocks': {'description': 'Provide a mechanism to bypass blocks of content that are repeated on multiple pages.', 'technical': 'Implement a "Skip to main content" link at the beginning of the page, or use ARIA landmark roles.', 'impact': 'Keyboard-only and screen reader users who can avoid tabbing through navigation on every page.'},
+    '2.4.2_page-titled': {'description': 'Provide web pages with titles that describe topic or purpose.', 'technical': 'Use a unique and descriptive `<title>` element for each page.', 'impact': 'All users, especially screen reader users who rely on the title to identify the page.'},
+    '2.4.3_focus-order': {'description': 'The navigation order of focusable components is logical and predictable.', 'technical': 'Ensure the DOM order matches the visual order. Avoid using `tabindex` with a positive value, as it disrupts the natural order.', 'impact': 'Keyboard-only users who would be confused by a focus indicator jumping erratically around the page.'},
+    '2.4.4_link-purpose-in-context': {'description': 'The purpose of each link can be determined from the link text alone or from its context.', 'technical': 'Use descriptive link text (e.g., "Read our Q3 financial report") instead of generic text ("Click here").', 'impact': 'Screen reader users who often navigate by listing all the links on a page.'},
+    '2.4.5_multiple-ways': {'description': 'Provide more than one way to locate a web page within a set of pages.', 'technical': 'Provide a site map, a search function, and/or a clear navigation menu.', 'impact': 'All users, but especially those with cognitive or orientation difficulties.'},
+    '2.4.6_headings-and-labels': {'description': 'Headings and labels describe the topic or purpose of the content they introduce.', 'technical': 'Write clear and descriptive text for headings (`<h1>`-`<h6>`) and form labels (`<label>`).', 'impact': 'Screen reader users who use headings to skim content, and all users who benefit from clear organization.'},
+    '2.4.7_focus-visible': {'description': 'Ensure a keyboard focus indicator is always visible.', 'technical': 'Do not remove the default focus outline (e.g., `outline: none;`). If you customize it, ensure the custom indicator is highly visible.', 'impact': 'Sighted keyboard-only users who need to see where they are on the page.'},
+    '2.4.8_location': {'description': 'Provide information about the user\'s location within a set of web pages.', 'technical': 'Use breadcrumbs, a site map, or clear headings to indicate the user\'s current position in the site hierarchy.', 'impact': 'Users with cognitive disabilities who can get lost on large websites.'},
+    '2.4.9_link-purpose-link-only': {'description': 'The purpose of each link can be determined from the link text alone.', 'technical': 'A stricter version of 2.4.4. All links must be fully descriptive without needing surrounding context.', 'impact': 'Screen reader users.'},
+    '2.4.10_section-headings': {'description': 'Use section headings to organize the content.', 'technical': 'Break up long-form content with a clear and logical hierarchy of `<h1>`-`<h6>` headings.', 'impact': 'Users with cognitive and learning disabilities, and screen reader users who navigate by headings.'},
+    '2.4.11_focus-not-obscured-minimum': {'description': 'Ensure that when an element receives focus, it is not entirely hidden by other content.', 'technical': 'Make sure sticky headers/footers or other author-created content do not completely cover the focused element.', 'impact': 'Sighted keyboard-only users.'},
+    '2.4.12_focus-not-obscured-enhanced': {'description': 'Ensure no part of a focused component is hidden by author-created content.', 'technical': 'A stricter version of 2.4.11, ensuring the entire component is visible.', 'impact': 'Sighted keyboard-only users.'},
+    '2.4.13_focus-appearance': {'description': 'The focus indicator must have sufficient size and contrast.', 'technical': 'The focus indicator must be at least 2 CSS pixels thick and have a 3:1 contrast ratio against the unfocused state.', 'impact': 'Users with low vision who may not see a faint focus indicator.'},
+    '2.5.1_pointer-gestures': {'description': 'All functionality that uses multipoint or path-based gestures can be operated with a single pointer.', 'technical': 'If a map uses pinch-to-zoom, also provide `+` and `-` buttons. If content uses a swipe gesture, provide next/previous buttons.', 'impact': 'Users with motor disabilities who can only use a standard pointer device and cannot perform complex gestures.'},
+    '2.5.2_pointer-cancellation': {'description': 'Functionality can be cancelled or reversed.', 'technical': 'Trigger actions on the "up-event" (e.g., `mouseup` or `click`) rather than the "down-event" (`mousedown`). This allows users to move their finger/cursor away to cancel.', 'impact': 'Users with motor disabilities who may accidentally touch the screen or press a mouse button.'},
+    '2.5.3_label-in-name': {'description': 'For components with a visible text label, the accessible name must contain the visible text.', 'technical': 'If a button says "Read More", its `aria-label` must be "Read More about Our Services", not just "Our Services".', 'impact': 'Users of speech recognition software who speak the visible label to activate a control.'},
+    '2.5.4_motion-actuation': {'description': 'Functionality operated by device motion can also be operated by UI components.', 'technical': 'If an action can be triggered by shaking the device, also provide a button to trigger that action.', 'impact': 'Users with motor disabilities who cannot perform the required motion.'},
+    '2.5.5_target-size-enhanced': {'description': 'The size of the target for pointer inputs is at least 44 by 44 CSS pixels.', 'technical': 'Ensure all clickable targets (buttons, links) are sufficiently large.', 'impact': 'Users with motor impairments, users with large fingers on touch screens, and users in unstable environments (e.g., a bus).'},
+    '2.5.6_concurrent-input-mechanisms': {'description': 'Do not restrict the use of available input modalities (e.g., touch, keyboard, mouse).', 'technical': 'Design interfaces that can be used with a mouse, keyboard, and touch simultaneously without switching modes.', 'impact': 'Users who use multiple input methods, such as a keyboard and a touch screen.'},
+    '2.5.7_dragging-movements': {'description': 'Provide a single pointer alternative for any functionality that uses a dragging movement.', 'technical': 'For a drag-and-drop interface, provide an alternative mechanism, such as selecting an item and then selecting a destination.', 'impact': 'Users with motor disabilities who find clicking-and-holding difficult.'},
+    '2.5.8_target-size-minimum': {'description': 'The size of the target for pointer inputs is at least 24 by 24 CSS pixels.', 'technical': 'Ensure all clickable targets meet the minimum size, or have sufficient spacing from other targets.', 'impact': 'Users with motor impairments and touch screen users.'},
+    # Understandable
+    '3.1.1_language-of-page': {'description': 'Specify the default human language of the page.', 'technical': 'Add the `lang` attribute to the `<html>` element, e.g., `<html lang="en">`.', 'impact': 'Screen readers that use the attribute to switch to the correct voice profile for pronunciation.'},
+    '3.1.2_language-of-parts': {'description': 'Specify the human language of specific passages or phrases in the content.', 'technical': 'Use the `lang` attribute on elements containing text in a different language, e.g., `<span lang="fr">C\'est la vie</span>`.', 'impact': 'Screen reader users, ensuring correct pronunciation of foreign words.'},
+    '3.1.3_unusual-words': {'description': 'Provide a mechanism to identify specific definitions of unusual words or jargon.', 'technical': 'Provide a glossary, or use the `<dfn>` or `<abbr>` tags to define terms in-context.', 'impact': 'Users with cognitive disabilities, and users unfamiliar with the subject matter.'},
+    '3.1.4_abbreviations': {'description': 'Provide a mechanism for identifying the expanded form of abbreviations.', 'technical': 'Use the `<abbr>` tag with a `title` attribute to provide the full text, e.g., `<abbr title="World Wide Web Consortium">W3C</abbr>`.', 'impact': 'All users who may not know the meaning of an abbreviation.'},
+    '3.1.5_reading-level': {'description': 'When content requires advanced reading ability, provide a simpler alternative.', 'technical': 'Provide a simplified summary or an alternate version of the content written in plain language.', 'impact': 'Users with reading or cognitive disabilities.'},
+    '3.1.6_pronunciation': {'description': 'Provide the specific pronunciation of words where meaning is ambiguous without it.', 'technical': 'Provide phonetic pronunciation in text or an audio clip, especially for words that are spelled the same but pronounced differently (homographs).', 'impact': 'Screen reader users and people with reading disabilities.'},
+    '3.2.1_on-focus': {'description': 'Setting focus on a component does not cause a change of context.', 'technical': 'Do not trigger actions (like submitting a form or opening a new window) simply because an element receives focus. The user must explicitly activate it.', 'impact': 'Keyboard and screen reader users who would be disoriented by unexpected changes.'},
+    '3.2.2_on-input': {'description': 'Changing the setting of a UI component does not automatically cause a change of context.', 'technical': 'Do not automatically submit a form or navigate to a new page when a user makes a selection in a dropdown list. Provide a separate "Submit" button.', 'impact': 'Users who may not be ready for a change to occur and could be disoriented.'},
+    '3.2.3_consistent-navigation': {'description': 'Navigational mechanisms that are repeated on multiple pages appear in the same relative order.', 'technical': 'Keep the main navigation, header, and footer consistent across all pages of a site.', 'impact': 'Users with cognitive disabilities, low vision, and screen reader users who rely on predictability.'},
+    '3.2.4_consistent-identification': {'description': 'Components with the same functionality are identified consistently.', 'technical': 'Use the same icon and label for a function across all pages. E.g., a shopping cart icon should always look the same and have the same accessible name.', 'impact': 'All users, especially those with cognitive disabilities, who benefit from consistency.'},
+    '3.2.5_change-on-request': {'description': 'Changes of context are initiated only by user request, or a mechanism is available to turn them off.', 'technical': 'Avoid auto-redirects, carousels that auto-advance, or other automatic content updates. If they exist, provide a control to stop them.', 'impact': 'Screen reader users and users with cognitive disabilities who can be disoriented by unexpected changes.'},
+    '3.2.6_consistent-help': {'description': 'If a help mechanism is provided, it is located consistently across pages.', 'technical': 'Place the link to a "Help" or "Contact Us" page in the same location (e.g., the footer) on every page.', 'impact': 'Users who need assistance and benefit from a predictable way to find it.'},
+    '3.3.1_error-identification': {'description': 'If an input error is automatically detected, the item in error is identified and the error is described in text.', 'technical': 'Clearly highlight the field with the error and provide a text message explaining what is wrong. Use `aria-describedby` to link the error message to the input.', 'impact': 'All users, but especially screen reader users who need the error to be announced.'},
+    '3.3.2_labels-or-instructions': {'description': 'Provide labels or instructions when content requires user input.', 'technical': 'Use the `<label>` element for all form controls. Provide clear instructions for required formats (e.g., "Date (MM/DD/YYYY)").', 'impact': 'All users, especially screen reader users who need the label to understand the purpose of a form field.'},
+    '3.3.3_error-suggestion': {'description': 'If an input error is known, suggestions for correction are provided.', 'technical': 'If a username is taken, suggest alternatives. If a date is in the wrong format, state the correct format.', 'impact': 'Users with cognitive or learning disabilities who may have trouble correcting errors.'},
+    '3.3.4_error-prevention-legal-financial-data': {'description': 'For pages that cause legal commitments or financial transactions, submissions are reversible, checked, or confirmed.', 'technical': 'Provide a confirmation page before finalizing a purchase, or allow users to cancel an order within a certain timeframe.', 'impact': 'Users with disabilities who are more prone to making mistakes.'},
+    '3.3.5_help': {'description': 'Provide context-sensitive help.', 'technical': 'Provide instructions and guidance in-context, for example, a tooltip explaining a complex field, or a link to a help page.', 'impact': 'Users with cognitive and learning disabilities.'},
+    '3.3.6_error-prevention-all': {'description': 'For all pages that require user submission, the submission is reversible, checked, or confirmed.', 'technical': 'A stricter version of 3.3.4, applying the same logic to all forms, not just legal/financial ones.', 'impact': 'All users who could make a mistake.'},
+    '3.3.7_redundant-entry': {'description': 'Avoid requiring the user to re-enter information they have already provided in the same session.', 'technical': 'Auto-populate fields where possible. For example, if the shipping and billing addresses are the same, provide a checkbox to copy the information.', 'impact': 'Users with cognitive and motor disabilities who may find re-typing information difficult or error-prone.'},
+    '3.3.8_accessible-authentication-minimum': {'description': 'Do not require a cognitive function test unless it is to recognize objects or personal content.', 'technical': 'Avoid puzzles, transcription, or memory tasks for authentication. Allow use of password managers (copy/paste is enabled).', 'impact': 'Users with cognitive disabilities, such as memory loss or dyslexia.'},
+    '3.3.9_accessible-authentication-enhanced': {'description': 'Do not require a cognitive function test as part of an authentication process.', 'technical': 'A stricter version of 3.3.8. A cognitive test cannot be the only method of authentication; an alternative must be provided.', 'impact': 'Users with cognitive disabilities.'},
+    # Robust
+    '4.1.1_parsing': {'description': 'This criterion is obsolete and removed in WCAG 2.2.', 'technical': 'Formerly required valid, well-formed HTML. Its goals are now better covered by 4.1.2 and modern browser tolerance. Focus on writing valid code and correct ARIA usage.', 'impact': 'N/A as it is removed. The underlying principle helps assistive technology interpret content reliably.'},
+    '4.1.2_name-role-value': {'description': 'Ensure all UI components have a name and role, and that their state can be programmatically determined.', 'technical': 'Use native HTML elements correctly or add appropriate ARIA roles, states, and properties (e.g., `role="button"`, `aria-pressed="true"`) to custom components.', 'impact': 'Screen reader users whose software relies on this information to convey the purpose and state of controls.'},
+    '4.1.3_status-messages': {'description': 'Status messages can be programmatically determined so they can be presented to the user without receiving focus.', 'technical': 'Use an ARIA live region (`role="status"`, `role="alert"`, or `aria-live`) to wrap content that updates dynamically (e.g., "Item added to cart", "Search results updated").', 'impact': 'Screen reader users who need to be notified of important changes on the page without losing their current focus.'},
 }
 
 PAGE_TYPE_PATTERNS = {
@@ -771,9 +829,14 @@ class AccessibilityAnalyzer:
         total_severity = df['severity_score'].sum()
         metrics['Weighted Severity Score'] = round(total_severity / unique_pages, 2) if unique_pages > 0 else 0
 
-        pages_with_critical = df[df['impact'] == 'critical']['normalized_url'].nunique()
-        critical_page_pct = (pages_with_critical / unique_pages * 100) if unique_pages > 0 else 0
+        # Trova tutte le pagine che hanno almeno UNA violazione critica
+        pages_with_critical = set(df[df['impact'] == 'critical']['normalized_url'].unique())
+        all_pages = set(df['normalized_url'].unique())
+        num_critical_pages = len(pages_with_critical)
+        num_total_pages = len(all_pages)
+        critical_page_pct = (num_critical_pages / num_total_pages * 100) if num_total_pages > 0 else 0
         metrics['Pages with Critical Issues (%)'] = round(critical_page_pct, 2)
+        self.logger.debug(f"Pages with critical: {num_critical_pages}, Total pages: {num_total_pages}, Percent: {critical_page_pct}")
 
         # --- Page Type Metrics ---
         metrics['Page Type Analysis'] = self._calculate_page_type_metrics(df)
@@ -783,7 +846,7 @@ class AccessibilityAnalyzer:
 
         # --- Conformance Metrics ---
         metrics.update(self._calculate_conformance_metrics(
-            df, impact_counts, unique_pages, pages_with_critical))
+            df, impact_counts, unique_pages, num_critical_pages))
 
         # --- Funnel Analysis Metrics ---
         # Perform funnel analysis only if funnel data exists ('is_in_funnel' column is True for some rows)
@@ -1054,36 +1117,30 @@ class AccessibilityAnalyzer:
 
         # --- Aggregation by Violation Type ---
         try:
+            # Only keep the relevant columns for the 'By Violation' table
             agg_funcs_violation = {
-                 'Total_Occurrences': pd.NamedAgg(column='violation_id', aggfunc='count'),
-                 'Affected_Pages': pd.NamedAgg(column='normalized_url', aggfunc='nunique'),
-                 'WCAG_Category': pd.NamedAgg(column='wcag_category', aggfunc='first'),
-                 'WCAG_Criterion': pd.NamedAgg(column='wcag_criterion', aggfunc='first'),
-                 'WCAG_Name': pd.NamedAgg(column='wcag_name', aggfunc='first'),
-                 'Most_Common_Impact': pd.NamedAgg(column='impact', aggfunc=lambda x: x.mode()[0] if not x.mode().empty else 'unknown'),
+                'Total_Occurrences': pd.NamedAgg(column='violation_id', aggfunc='count'),
+                'Affected_Pages': pd.NamedAgg(column='normalized_url', aggfunc='nunique'),
+                'WCAG_Category': pd.NamedAgg(column='wcag_category', aggfunc='first'),
+                'WCAG_Criterion': pd.NamedAgg(column='wcag_criterion', aggfunc='first'),
+                'WCAG_Name': pd.NamedAgg(column='wcag_name', aggfunc='first'),
+                'Most_Common_Impact': pd.NamedAgg(column='impact', aggfunc=lambda x: x.mode()[0] if not x.mode().empty else 'unknown'),
             }
-             # Add counts per impact level for each violation type
-            for impact_level in self.impact_weights.keys():
-                 agg_funcs_violation[f'{impact_level.capitalize()}_Count'] = pd.NamedAgg(
-                     column='impact', aggfunc=lambda x: (x == impact_level).sum()
-                 )
 
             agg_violation = df.groupby('violation_id').agg(**agg_funcs_violation).reset_index()
 
             # Calculate Priority Score per violation type
-            agg_violation['Priority_Score'] = sum(
-                agg_violation[f'{level.capitalize()}_Count'] * weight
-                for level, weight in self.impact_weights.items() if level != 'unknown'
-            )
+            impact_weights = self.impact_weights
+            def priority_score(row):
+                return impact_weights.get(row['Most_Common_Impact'], 0) * row['Total_Occurrences']
+            agg_violation['Priority_Score'] = agg_violation.apply(priority_score, axis=1)
 
             # Add Solution Info
             def get_solution_info(violation_id, field):
                 violation_id_lower = violation_id.lower()
-                # Simple 'in' matching - might need refinement
                 for key, solution_data in self.solution_mapping.items():
-                     if key in violation_id_lower:
-                          return solution_data.get(field, "N/A")
-                # Default values if no match
+                    if key in violation_id_lower:
+                        return solution_data.get(field, "N/A")
                 if field == 'description': return 'Check WCAG guidelines for this violation'
                 if field == 'technical': return 'Refer to WCAG documentation'
                 if field == 'impact': return 'May affect users with disabilities'
@@ -1093,9 +1150,19 @@ class AccessibilityAnalyzer:
             agg_violation['Technical_Solution'] = agg_violation['violation_id'].apply(lambda vid: get_solution_info(vid, 'technical'))
             agg_violation['User_Impact'] = agg_violation['violation_id'].apply(lambda vid: get_solution_info(vid, 'impact'))
 
-            # Add Percentage of Total Violations
-            total_violations = agg_violation['Total_Occurrences'].sum()
+            # Calculate percentage based on the total number of violations in the cleaned DataFrame
+            total_violations = len(df)
+            sum_agg = agg_violation['Total_Occurrences'].sum()
+            self.logger.debug(f"[By Violation] total_violations (rows in df): {total_violations}, sum of Total_Occurrences: {sum_agg}")
             agg_violation['Percentage'] = (agg_violation['Total_Occurrences'] / total_violations * 100).round(2) if total_violations > 0 else 0
+
+            # Reorder columns for clarity
+            columns_order = [
+                'violation_id', 'Most_Common_Impact', 'WCAG_Category', 'WCAG_Criterion', 'WCAG_Name',
+                'Total_Occurrences', 'Affected_Pages', 'Priority_Score', 'Percentage',
+                'Solution_Description', 'Technical_Solution', 'User_Impact'
+            ]
+            agg_violation = agg_violation[columns_order]
 
             # Sort by priority score
             agg_violation = agg_violation.sort_values('Priority_Score', ascending=False)
@@ -2159,10 +2226,17 @@ class AccessibilityAnalyzer:
                      if "Score" in name:
                          fmt = workbook.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter', 'border': 1,
                                                     'bg_color': '#92D050' if value >= 90 else '#FFEB9C' if value >= 75 else '#FFCCCC'})
-                     elif "%" in name: fmt = percent_format
-                     elif isinstance(value, int): fmt = num_format
-                     elif isinstance(value, float): fmt = num_dec_format
-                     else: fmt = cell_center_format
+                     elif name == "Pages with Critical Issues (%)":
+                         fmt = percent_format
+                         value = value / 100  # <--- AGGIUNGI QUESTO!
+                     elif "%" in name: 
+                         fmt = percent_format
+                     elif isinstance(value, int): 
+                         fmt = num_format
+                     elif isinstance(value, float): 
+                         fmt = num_dec_format
+                     else: 
+                         fmt = cell_center_format
 
                      summary_ws.write(current_row, 1, value, fmt)
                      if "Score" in name: # Put level next to score
@@ -2257,13 +2331,36 @@ class AccessibilityAnalyzer:
                 if template_projection_df is not None and not template_projection_df.empty:
                     template_ws = workbook.add_worksheet('Template Projection')
                     template_ws.merge_range('A1:I1', 'Template-Based Violation Projection', title_format)
-                    template_ws.merge_range('A2:I2',
-                                           "Estimates total violations by projecting issues found on a template's representative page across all its occurrences.",
-                                           note_format)
-                    template_ws.merge_range('A3:I3',
-                                            "Note: This is an estimation and accuracy depends on template consistency. Use 'Analysis by Detected Template' for issues confirmed on scanned pages.",
-                                           note_format)
-                    write_df_to_excel(template_ws, template_projection_df, 5, "Template Projection Results")
+                    # --- Pipeline summary and explanation ---
+                    total_templates = template_projection_df['Template'].nunique()
+                    total_occurrences = template_projection_df['Occurrence_Count'].sum()
+                    analyzed_templates = template_projection_df[template_projection_df['Sample_Violations'] > 0]['Template'].nunique()
+                    analyzed_pages = analyzed_templates
+                    pipeline_desc = (
+                        "In questa sezione viene stimato l'impatto delle violazioni accessibilità proiettando i problemi trovati sulla pagina rappresentativa di ciascun template su tutte le pagine che condividono la stessa struttura. "
+                        "\n\nLa pipeline segue questi passi: "
+                        "\n- Il crawler identifica e raggruppa tutte le pagine simili (template) e salva la lista completa delle occorrenze. "
+                        "\n- Per ogni template viene scelta una pagina rappresentativa che viene analizzata con axe-core. "
+                        "\n- Le violazioni trovate su quella pagina vengono moltiplicate per il numero di occorrenze del template, stimando così l'impatto potenziale su tutto il sito. "
+                        "\n\nQuesta proiezione aiuta a capire la priorità di intervento anche su pagine non direttamente analizzate."
+                    )
+                    template_ws.merge_range('A2:I2', pipeline_desc, note_format)
+                    # Riepilogo numerico
+                    summary_labels = [
+                        ("Numero totale di template rilevati", total_templates),
+                        ("Numero totale di URL raccolti dal crawler", total_occurrences),
+                        ("Numero totale di pagine associate a template", total_occurrences),
+                        ("Template effettivamente analizzati (con almeno una pagina rappresentativa)", analyzed_templates),
+                        ("Pagine rappresentative analizzate", analyzed_pages)
+                    ]
+                    row_summary = 3
+                    template_ws.write(row_summary, 0, "Riepilogo Pipeline Template Projection:", subtitle_format)
+                    for i, (label, value) in enumerate(summary_labels):
+                        template_ws.write(row_summary + 1 + i, 0, label, metric_name_format)
+                        template_ws.write(row_summary + 1 + i, 1, value, metric_value_format)
+                    start_table_row = row_summary + 2 + len(summary_labels)
+                    template_ws.merge_range(f'A{start_table_row}:I{start_table_row}', "Risultati dettagliati per ciascun template:", subtitle_format)
+                    write_df_to_excel(template_ws, template_projection_df, start_table_row + 1, "Template Projection Results")
                 else:
                      self.logger.info("Skipping 'Template Projection' sheet: No projection data provided.")
 

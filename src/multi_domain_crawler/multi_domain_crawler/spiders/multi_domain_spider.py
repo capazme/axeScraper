@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Enhanced multi-domain spider that fully utilizes the configuration system.
-This spider integrates with config_manager.py and respects environment variables
-set in the .env file or passed directly to the application.
+Enhanced multi-domain spider with fixed Selenium integration and error handling.
 """
 
 from collections import defaultdict
@@ -21,6 +19,7 @@ from scrapy.loader import ItemLoader
 from scrapy.utils.url import url_has_any_extension
 from scrapy.http import Request, HtmlResponse, TextResponse
 from scrapy.exceptions import CloseSpider
+import hashlib
 
 from ..items import PageItem, PageItemLoader
 from ..utils.url_filters import URLFilters
@@ -33,252 +32,167 @@ import sys
 import os
 import importlib.util
 try:
-    # Try relative import from this package
     from ....utils.config_manager import ConfigurationManager
 except ImportError:
-    # If running standalone, try to find the module in the project
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     sys.path.insert(0, project_root)
     try:
         from src.utils.config_manager import ConfigurationManager
     except ImportError:
-        # Fallback to basic configuration if config_manager can't be imported
         ConfigurationManager = None
 
 
 class MultiDomainSpider(scrapy.Spider):
     """
-    Enhanced spider for multi-domain crawling with improved configuration handling.
-    
-    This spider integrates with the axeScraper configuration system, respecting:
-    - Environment variables from .env files
-    - Command-line arguments
-    - Default configuration values
+    Enhanced spider for multi-domain crawling with improved Selenium handling.
     """
     
     name = 'multi_domain_spider'
-    
-    # These variables will be initialized dynamically
     allowed_domains = []
     start_urls = []
     
     def __init__(self, *args, **kwargs):
-        """
-        Initialize the spider with domains and configurations from multiple sources.
+        """Initialize the spider with domains and configurations."""
+        super().__init__(*args, **kwargs)
         
-        Respects configuration hierarchy:
-        1. Command-line arguments (highest priority)
-        2. Environment variables
-        3. Configuration files (.env, etc.)
-        4. Default values (lowest priority)
-        """
-        super(MultiDomainSpider, self).__init__(*args, **kwargs)
+        # Initialize configuration manager
+        self.config_manager = None
+        if ConfigurationManager:
+            try:
+                self.config_manager = ConfigurationManager()
+                self.logger.info("Configuration manager initialized successfully")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize configuration manager: {e}")
         
-        """  # Initialize logger
-            self.logger = logging.getLogger(f'{self.name}_logger')
-            self.logger.setLevel(logging.INFO) """
+        # Initialize output manager for centralized path management
+        self.output_manager = None
+        try:
+            from ....utils.output_manager import OutputManager
+            from ....utils.config import OUTPUT_ROOT
+            temp_domains = self._get_domains(kwargs)
+            if temp_domains:
+                self.output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=temp_domains[0], create_dirs=True)
+                self.logger.info("Output manager initialized successfully")
+        except ImportError:
+            try:
+                from src.utils.output_manager import OutputManager
+                from src.utils.config import OUTPUT_ROOT
+                temp_domains = self._get_domains(kwargs)
+                if temp_domains:
+                    self.output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=temp_domains[0], create_dirs=True)
+                    self.logger.info("Output manager initialized successfully")
+            except ImportError:
+                self.logger.warning("OutputManager not available")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize output manager: {e}")
         
-        # Load the configuration system if available
-        self.config_manager = self._initialize_config_manager(kwargs)
+        # Spider configuration with defaults
+        self.domains = self._get_domains(kwargs)
+        self.allowed_domains = self.domains
+        self.start_urls = [f"https://{domain}" for domain in self.domains]
         
-        # Configuration of domains - with multiple fallback options
-        self.domains = self._extract_domains(kwargs)
+        # Crawling limits
+        self.max_urls_per_domain = int(kwargs.get('max_urls_per_domain', 
+            self.config_manager.get('CRAWLER_MAX_URLS', 100) if self.config_manager else 100))
+        self.max_total_urls = int(kwargs.get('max_total_urls', 
+            self.config_manager.get('CRAWLER_MAX_TOTAL_URLS', 1000) if self.config_manager else 1000))
+        self.depth_limit = int(kwargs.get('depth_limit', 
+            self.config_manager.get('CRAWLER_DEPTH_LIMIT', 5) if self.config_manager else 5))
         
-        # Debug the parameters and domains
-        self.logger.info(f"Initialized with {len(self.domains)} domains: {', '.join(self.domains)}")
-            
-        # Configure allowed_domains and start_urls
-        self.allowed_domains = self.domains.copy()
+        # Mode configuration
+        self.hybrid_mode = kwargs.get('hybrid_mode', 
+            str(self.config_manager.get('CRAWLER_HYBRID_MODE', 'true') if self.config_manager else 'true')).lower() == 'true'
+        self.selenium_threshold = int(kwargs.get('selenium_threshold', 
+            self.config_manager.get('CRAWLER_PENDING_THRESHOLD', 30) if self.config_manager else 30))
+        self.request_delay = float(kwargs.get('request_delay', 
+            self.config_manager.get('CRAWLER_REQUEST_DELAY', 0.5) if self.config_manager else 0.5))
         
-        # Prepare initial URLs - use domains as specified, don't auto-add www
-        self.start_urls = []
-        
-        # Check if we have BASE_URLS from config to respect the exact URLs specified
-        base_urls = []
-        if self.config_manager is not None:
-            base_urls = self.config_manager.get("BASE_URLS", [])
-        self.logger.info(f"DEBUG: BASE_URLS letto dalla config: {base_urls}")
-        if not base_urls:
-            base_urls = ["www.nortbeachwear.com"]
-            self.logger.warning("BASE_URLS non trovato o vuoto, forzato a /it/!")
-        self.start_urls = base_urls.copy()
-        self.logger.info(f"Starting URLs: {', '.join(self.start_urls)}")
-
-        # Configuration limits - read from config with fallback to kwargs with defaults
-        self.max_urls_per_domain = self._get_config('max_urls_per_domain', 'CRAWLER_MAX_URLS', 
-                                                 kwargs, default=1000)
-        self.max_total_urls = self._get_config('max_total_urls', 'CRAWLER_MAX_TOTAL_URLS', 
-                                            kwargs, default=None)
-        self.depth_limit = self._get_config('depth_limit', 'CRAWLER_DEPTH_LIMIT', 
-                                         kwargs, default=10)
-        
-        # Hybrid mode configuration
-        self.hybrid_mode = self._get_config_bool('hybrid_mode', 'CRAWLER_HYBRID_MODE', 
-                                             kwargs, default=True)
-        self.request_delay = self._get_config_float('request_delay', 'CRAWLER_REQUEST_DELAY', 
-                                                kwargs, default=0.25)
-        self.selenium_threshold = self._get_config('selenium_threshold', 'CRAWLER_PENDING_THRESHOLD', 
-                                               kwargs, default=30)
-        
-        # Respect robots.txt
-        self.respect_robots = self._get_config_bool('respect_robots', 'CRAWLER_RESPECT_ROBOTS', 
-                                                kwargs, default=False)
-        
-        # Statistics and counters by domain
+        # Tracking
         self.processed_count = 0
-        self.domain_counts = {domain: 0 for domain in self.domains}
-        self.url_tree = {}
-        self.structures = {}
-        self.template_cache = {}
+        self.domain_counts = defaultdict(int)
+        self.using_selenium = True  # Start with Selenium in hybrid mode
+        self.selenium_error_count = 0
+        self.selenium_max_errors = 10
         
-        # Navigation mode flags
-        self.using_selenium = self.hybrid_mode
-        self.switch_occurred = False
+        # Template detection
+        self.templates = defaultdict(lambda: defaultdict(list))
+        self.template_structures = defaultdict(lambda: defaultdict(dict))
+        self.structure_threshold = 0.85
         
-        # Advanced link extractor
-        self.link_extractor = AdvancedLinkExtractor(allowed_domains=self.domains)
+        self.domain_limit_reached = set()
         
-        # Settings for robots.txt
-        if self.respect_robots:
-            from scrapy.robotstxt import RobotFileParser
-            self.robots_parsers = {}
+        self.crawling_finished = False  # Flag per bloccare crawling
         
-        # Log the configuration settings
-        self._log_configuration()
-    
-    def _initialize_config_manager(self, kwargs):
-        """Initialize the configuration manager using only configuration file and CLI arguments."""
-        if ConfigurationManager is None:
-            return None
-        # Non si cerca più il file .env; si passa solo il config_file (se specificato) e i CLI args.
-        return ConfigurationManager(
-            project_name="axeScraper",
-            config_file=kwargs.get('config_file'),  # Puoi passare il percorso al file di configurazione
-            cli_args=kwargs
-        )
+        self.logger.info(f"Spider initialized with {len(self.domains)} domains")
+        self.logger.info(f"Hybrid mode: {self.hybrid_mode}, Selenium threshold: {self.selenium_threshold}")
 
-    def _extract_domains(self, kwargs):
+    def _get_domains(self, kwargs):
+        """Extract domains from arguments or configuration."""
         domains = []
         
-        domains_input = kwargs.get('domains', '')
-        domains_file = kwargs.get('domains_file', '')
-        single_domain = kwargs.get('domain', '')
+        # Try domains_file first
+        domains_file = kwargs.get('domains_file')
+        if domains_file and os.path.exists(domains_file):
+            with open(domains_file, 'r') as f:
+                domains = [line.strip() for line in f if line.strip()]
         
-        # 1. List from CLI parameter
-        if domains_input:
-            self.logger.info(f"Using domains from CLI parameter: '{domains_input}'")
-            raw_domains = [d.strip() for d in domains_input.split(',') if d.strip()]
-            
-            # Improved domain extraction
-            for raw_domain in raw_domains:
-                # Extract just the domain from URLs
-                if '://' in raw_domain or raw_domain.startswith('www.'):
-                    parsed = urlparse(raw_domain if '://' in raw_domain else f"https://{raw_domain}")
-                    clean_domain = parsed.netloc
-                    # Remove www. prefix if present
-                    if clean_domain.startswith('www.'):
-                        clean_domain = clean_domain[4:]
-                    domains.append(clean_domain)
-                else:
-                    # Check if it contains path elements and strip them
-                    if '/' in raw_domain:
-                        clean_domain = raw_domain.split('/', 1)[0]
-                    else:
-                        clean_domain = raw_domain
-                    domains.append(clean_domain)
-                    
-        # Rest of the method remains the same...
+        # Fallback to domains argument
+        if not domains:
+            domains_str = kwargs.get('domains', '')
+            if domains_str:
+                domains = [d.strip() for d in domains_str.split(',') if d.strip()]
         
-        # Ensure we have valid domains
-        domains = [d for d in domains if d and '.' in d]
+        # Fallback to configuration
+        if not domains and self.config_manager:
+            domains_str = self.config_manager.get('DOMAINS', '')
+            if domains_str:
+                domains = [d.strip() for d in domains_str.split(',') if d.strip()]
         
-        return domains
-    
-    def _get_config(self, kwarg_name, config_key, kwargs, default=None):
-        """
-        Get configuration value with proper fallback priority.
+        # Normalize domains
+        normalized_domains = []
+        for domain in domains:
+            domain = domain.lower().strip()
+            domain = re.sub(r'^https?://', '', domain)
+            domain = domain.rstrip('/')
+            if domain and '.' in domain:
+                normalized_domains.append(domain)
         
-        Ordine di priorità:
-        1. Argomenti da linea di comando (CLI args)
-        2. File di configurazione (attraverso il ConfigurationManager)
-        3. Valore predefinito
+        if not normalized_domains:
+            raise ValueError("No valid domains provided")
         
-        Args:
-            kwarg_name: Nome del parametro nei kwargs (CLI)
-            config_key: Chiave del file di configurazione
-            kwargs: Dizionario dei parametri passati
-            default: Valore predefinito se non trovato
-            
-        Returns:
-            Valore di configurazione
-        """
-        # 1. Check CLI arguments
-        if kwarg_name in kwargs:
-            try:
-                return int(kwargs[kwarg_name])
-            except (ValueError, TypeError):
-                return kwargs[kwarg_name]
-        
-        # 2. Check configuration manager (file di configurazione)
-        if self.config_manager is not None:
-            value = self.config_manager.get(config_key)
-            if value is not None:
-                return value
-        
-        # 3. Default value
-        return default
+        return normalized_domains
 
-    def _get_config_bool(self, kwarg_name, env_name, kwargs, default=False):
-        """Get boolean configuration with proper type conversion."""
-        value = self._get_config(kwarg_name, env_name, kwargs, default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.lower() in ('1', 'true', 'yes', 'y', 'on')
-        return bool(value)
-    
-    def _get_config_float(self, kwarg_name, env_name, kwargs, default=0.0):
-        """Get float configuration with proper type conversion."""
-        value = self._get_config(kwarg_name, env_name, kwargs, default)
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return default
-    
-    def _log_configuration(self):
-        """Log the active configuration settings for debugging."""
-        self.logger.info(f"Configuration: max_urls_per_domain={self.max_urls_per_domain}, "
-                         f"max_total_urls={self.max_total_urls}, "
-                         f"hybrid_mode={self.hybrid_mode}, "
-                         f"depth_limit={self.depth_limit}, "
-                         f"request_delay={self.request_delay}, "
-                         f"selenium_threshold={self.selenium_threshold}")
-    
     def normalize_url(self, url):
+        """Normalize URL for consistency."""
+        if not url:
+            return None
+        
+        # Ensure URL has a scheme
         if not url.startswith(('http://', 'https://')):
-            return 'https://' + url
+            url = 'https://' + url
+        
+        # Remove fragment
+        url, _ = urldefrag(url)
+        
+        # Remove trailing slash
+        url = url.rstrip('/')
+        
         return url
 
     def start_requests(self):
-        """
-        Generate initial requests based on the configured parameters.
+        """Generate initial requests for each domain."""
+        if self.crawling_finished:
+            self.logger.warning("Crawling già terminato: nessuna richiesta iniziale generata.")
+            return
+        self.logger.info(f"Starting crawl for {len(self.domains)} domains")
         
-        Yields:
-            Request: Requests for each starting URL
-        """
-        self.logger.info(f"Starting crawl for {len(self.domains)} domains: {', '.join(self.domains)}")
-        
-        # Reset counters
         self.processed_count = 0
         self.domain_counts = {domain: 0 for domain in self.domains}
         
-        # Verify starting URLs
         if not self.start_urls:
-            self.logger.error("No starting URLs defined!")
-            # Fallback: create URLs from domains without auto-adding www
             self.start_urls = [f"https://{domain}" for domain in self.domains]
         
-        # Prepara header Authorization se HTTP Basic è configurato
+        # Prepare auth headers if configured
         import base64
         username = self.config_manager.get("AUTH_BASIC_USERNAME", "") if self.config_manager else ""
         password = self.config_manager.get("AUTH_BASIC_PASSWORD", "") if self.config_manager else ""
@@ -287,384 +201,44 @@ class MultiDomainSpider(scrapy.Spider):
             credentials = f"{username}:{password}"
             encoded_credentials = base64.b64encode(credentials.encode()).decode()
             auth_headers["Authorization"] = f"Basic {encoded_credentials}"
-            self.logger.info("Header Authorization HTTP Basic aggiunto alle richieste iniziali")
+            self.logger.info("HTTP Basic authentication configured")
         
         # Process each starting URL
         for i, url in enumerate(self.start_urls):
+            if self.crawling_finished:
+                self.logger.warning("Crawling terminato: blocco generazione richieste in start_requests.")
+                break
             url = self.normalize_url(url)
             headers = get_realistic_headers()
             headers.update(auth_headers)
-            if i == 0:
-                self.logger.info(f"Requesting initial URL with Selenium: {url}")
-                yield SeleniumRequest(
-                    url=url,
-                    headers=headers,
-                    callback=self.parse,
-                    wait_time=3,
-                    meta={
-                        'dont_redirect': False,
-                        'handle_httpstatus_list': [301, 302],
-                        'depth': 0,
-                        'selenium': True
-                    },
-                    errback=self.errback_httpbin
-                )
+            
+            if i == 0 and self.hybrid_mode:
+                self.logger.info(f"First request with Selenium: {url}")
+                yield self.make_selenium_request(url, self.parse, depth=0)
             else:
-                self.logger.info(f"Requesting initial URL: {url}")
+                self.logger.info(f"Requesting: {url}")
                 yield Request(
                     url=url,
                     headers=headers,
                     callback=self.parse,
                     meta={
                         'dont_redirect': False,
-                        'handle_httpstatus_list': [301, 302],
+                        'handle_httpstatus_list': [301, 302, 403, 429],
                         'depth': 0
                     },
                     errback=self.errback_httpbin
                 )
-    
-    def is_public_page(self, url):
-        """
-        Determine if a URL represents a public page that should be crawled.
-        
-        Args:
-            url: URL to evaluate
-            
-        Returns:
-            bool: True if the URL should be crawled
-        """
-        url_lower = url.lower()
-        
-        # Check against disallowed patterns for non-public content
-        disallowed_patterns = [
-            '/_layouts/', '/admin/', '/wp-admin/', '/cgi-bin/',
-            '/wp-json/', '/wp-content/uploads/', '/xmlrpc.php',
-            '/login', '/logout', '/cart', '/checkout'
-        ]
-        
-        for pattern in disallowed_patterns:
-            if pattern.lower() in url_lower:
-                return False
-                
-        # Skip static resources
-        extensions_to_skip = ['.jpg', '.jpeg', '.png', '.gif', '.css', '.js', '.xml', 
-                            '.pdf', '.zip', '.rar', '.exe', '.svg', '.ico']
-        
-        for ext in extensions_to_skip:
-            if url_lower.endswith(ext):
-                return False
-        
-        # By default, consider it public
-        return True
-    
-    def is_user_visible(self, response):
-        """
-        Detect if a page contains user-visible content.
-        
-        Args:
-            response: Scrapy Response object
-            
-        Returns:
-            bool: True if the page appears to be user-facing content
-        """
-        # Look for common page structure elements
-        has_header = bool(response.css('header, .header, #header, [role="banner"], .navbar, .nav-bar, .top-bar'))
-        has_nav = bool(response.css('nav, .nav, #nav, .menu, #menu, [role="navigation"], ul.menu, .navigation'))
-        has_main = bool(response.css('main, .main, #main, [role="main"], article, .content, #content, .page-content'))
-        has_footer = bool(response.css('footer, .footer, #footer, [role="contentinfo"], .site-footer'))
-        
-        # Check for basic content indicators
-        has_content = bool(response.css('p, h1, h2, h3, div.content, .container, .wrapper'))
-        
-        # Only need some indication of being a user page
-        return has_content and (has_header or has_nav or has_main or has_footer)
 
-    def has_meaningful_content(self, response):
-        """
-        Determine if a page has meaningful content worth analyzing.
-        
-        Args:
-            response: Scrapy Response object
-            
-        Returns:
-            bool: True if the page has substantive content
-        """
-        # Extract visible text
-        texts = response.xpath('//body//text()').getall()
-        
-        # Clean and join text
-        text_content = ' '.join([t.strip() for t in texts if t.strip()])
-        
-        # Check for reasonable text length
-        if len(text_content) > 200:
-            return True
-            
-        # Also check for important page elements
-        if response.css('h1, h2, h3, nav, article, section'):
-            return True
-            
-        return False
-
-    def _extract_js_links(self, response):
-        """
-        Extract links from JavaScript content.
-        
-        Args:
-            response: Scrapy Response object
-            
-        Returns:
-            set: Set of URLs found in JavaScript
-        """
-        js_links = set()
-        
-        # Extract URLs from script tags
-        scripts = response.xpath('//script/text()').getall()
-        for script in scripts:
-            # Find absolute URLs
-            url_matches = re.findall(r'["\']https?://[^"\']+["\']', script)
-            for match in url_matches:
-                clean_url = match.strip('\'"')
-                if URLFilters.get_domain(clean_url) in self.allowed_domains:
-                    js_links.add(clean_url)
-                    
-            # Find relative URLs
-            rel_matches = re.findall(r'["\'][/][^"\']+["\']', script)
-            for match in rel_matches:
-                clean_url = match.strip('\'"')
-                if clean_url.startswith('/'):
-                    full_url = urljoin(response.url, clean_url)
-                    js_links.add(full_url)
-                    
-        return js_links
-
-    def parse(self, response):
-        """
-        Main parsing method for web pages.
-        
-        Args:
-            response: Scrapy Response object
-            
-        Yields:
-            Item or Request: Scraped items or new requests
-        """
-        if not isinstance(response, (HtmlResponse, TextResponse)):
-            self.logger.debug(f"Salto risposta non testuale: {response.url} (type: {type(response)})")
-            return
-        
-        # Log dettagliato per risposte non 2xx
-        if not (200 <= response.status < 300):
-            self.logger.error(f"Risposta non 2xx: {response.url} | Status: {response.status}")
-            self.logger.error(f"Headers: {dict(response.headers)}")
-            body_preview = response.text[:500] if hasattr(response, 'text') else str(response.body)[:500]
-            self.logger.error(f"Body (primi 500 char): {body_preview}")
-
-        current_url = response.url
-        current_domain = URLFilters.get_domain(current_url)
-        
-        # Salva l'HTML della prima pagina scaricata (solo una volta)
-        if getattr(self, '_first_page_saved', False) is False:
-            import os
-            debug_dir = os.path.join(os.getcwd(), 'output')
-            os.makedirs(debug_dir, exist_ok=True)
-            debug_path = os.path.join(debug_dir, 'debug_first_page.html')
-            with open(debug_path, 'w', encoding='utf-8') as f:
-                f.write(response.text)
-            self.logger.info(f"Salvato HTML della prima pagina in: {debug_path}")
-            self._first_page_saved = True
-
-        self.logger.info(f"Parsing page: {current_url} ({current_domain})")
-        
-        # Check if domain is allowed
-        if current_domain not in self.allowed_domains:
-            self.logger.warning(f"Domain not allowed: {current_domain}, URL: {current_url}")
-            return
-            
-        # Check depth limit
-        depth = response.meta.get('depth', 0)
-        if self.depth_limit and depth >= self.depth_limit:
-            self.logger.debug(f"Depth limit reached ({depth}/{self.depth_limit}) for: {current_url}")
-            return
-            
-        # Update counters
-        self.processed_count += 1
-        self.domain_counts[current_domain] = self.domain_counts.get(current_domain, 0) + 1
-        
-        # Check domain URL limit
-        if self.max_urls_per_domain and self.domain_counts[current_domain] >= self.max_urls_per_domain:
-            self.logger.debug(f"URL limit reached for domain {current_domain}")
-            
-            # Check if all domains have reached their limits
-            all_domains_at_limit = all(
-                self.domain_counts.get(domain, 0) >= self.max_urls_per_domain
-                for domain in self.domains
-            )
-            
-            if all_domains_at_limit:
-                self.logger.info(f"All domains have reached their URL limits")
-                raise CloseSpider("All domains have reached URL limits")
-                
-            return
-
-            
-        # Check total URL limit
-        if self.max_total_urls and self.processed_count >= self.max_total_urls:
-            self.logger.info(f"Reached total URL limit: {self.max_total_urls}")
-            raise CloseSpider(f"Reached maximum total of {self.max_total_urls} URLs")
-            
-        # Update URL structure
-        self._update_url_structure(response)
-        
-        # Extract page item
-        item = self._extract_page_item(response)
-        if item:
-            yield item
-        
-        # Extract links
-        links = self.link_extractor.extract_links(response, current_domain)
-        self.logger.info(f"Links estratti: {links}")
-        
-        # Add JavaScript links
-        js_links = self._extract_js_links(response)
-        links.update(js_links)
-        self.logger.info(f"Links dopo aggiunta JS: {links}")
-        
-        # Filter links
-        filtered_links = {
-            link for link in links 
-            if URLFilters.is_valid_url(link) and URLFilters.get_domain(link) == current_domain and self.is_public_page(link)
-        }
-        self.logger.info(f"Links dopo filtro: {filtered_links}")
-        
-        # Check if we should switch from Selenium to HTTP in hybrid mode
-        if self.hybrid_mode and not self.switch_occurred:
-            pending_requests = len(self.crawler.engine.slot.scheduler)
-            if pending_requests >= self.selenium_threshold:
-                self.logger.info(f"Switching from Selenium to HTTP (pending: {pending_requests})")
-                self.using_selenium = False
-                self.switch_occurred = True
-                
-                # Update statistics
-                self.crawler.stats.set_value('hybrid_mode/switch_time', datetime.now().isoformat())
-                self.crawler.stats.set_value('hybrid_mode/switch_url', current_url)
-        
-        # Log progress
-        self.logger.info(f"Progress: {self.processed_count} total, {current_domain}: {self.domain_counts[current_domain]}")
-        
-        # Generate requests for found URLs
-        requests_generated = 0
-        for link in filtered_links:
-            # Skip if we've reached limits
-            link_domain = URLFilters.get_domain(link)
-            if self.max_urls_per_domain and self.domain_counts.get(link_domain, 0) >= self.max_urls_per_domain:
-                continue
-                
-            if self.max_total_urls and self.processed_count >= self.max_total_urls:
-                break
-            
-            # Check robots.txt if required
-            if self.respect_robots and not self._can_fetch(link):
-                self.logger.debug(f"URL blocked by robots.txt: {link}")
-                continue
-                
-            # Generate appropriate request
-            try:
-                # Increment depth
-                new_depth = depth + 1
-                
-                # Skip if exceeding depth limit
-                if self.depth_limit and new_depth > self.depth_limit:
-                    continue
-                
-                headers = get_realistic_headers(referer=current_url)
-                if self.hybrid_mode and self.using_selenium:
-                    req = self.make_selenium_request(
-                        link, 
-                        self.parse, 
-                        referer=current_url,
-                        depth=new_depth
-                    )
-                    if req:
-                        req.headers = headers
-                        requests_generated += 1
-                        yield req
-                else:
-                    requests_generated += 1
-                    yield Request(
-                        url=link, 
-                        headers=headers,
-                        callback=self.parse,
-                        meta={
-                            'referer': current_url,
-                            'dont_redirect': False,
-                            'handle_httpstatus_list': [301, 302],
-                            'depth': new_depth
-                        },
-                        errback=self.errback_httpbin
-                    )
-            except Exception as e:
-                self.logger.error(f"Error generating request for {link}: {e}")
-                
-        self.logger.info(f"Generated {requests_generated} new requests from {current_url}")
-    
-    def errback_httpbin(self, failure):
-        """
-        Handle request errors with fallback to Selenium if appropriate.
-        
-        Args:
-            failure: Twisted Failure object
-            
-        Yields:
-            Request: Potential fallback request
-        """
-        request = failure.request
-        url = request.url
-        domain = URLFilters.get_domain(url)
-        
-        self.logger.error(f"Error processing: {url}")
-        self.logger.error(f"Error type: {failure.type}")
-        self.logger.error(f"Error value: {failure.value}")
-        # Log dettagliato della risposta se presente
-        response = getattr(failure, 'value', None)
-        if hasattr(response, 'response') and response.response is not None:
-            resp = response.response
-            self.logger.error(f"[errback] Status: {resp.status}")
-            self.logger.error(f"[errback] Headers: {dict(resp.headers)}")
-            body_preview = resp.text[:500] if hasattr(resp, 'text') else str(resp.body)[:500]
-            self.logger.error(f"[errback] Body (primi 500 char): {body_preview}")
-        
-        # Update statistics
-        if domain in self.domains:
-            self.crawler.stats.inc_value(f'domain/{domain}/errors')
-        
-        # Try Selenium fallback in hybrid mode
-        if self.hybrid_mode and not request.meta.get('selenium'):
-            self.logger.info(f"Attempting Selenium fallback for: {url}")
-            yield self.make_selenium_request(
-                url, 
-                self.parse,
-                depth=request.meta.get('depth', 0)
-            )
-    
     def make_selenium_request(self, url, callback, referer=None, depth=0):
-        """
-        Create a Selenium request with appropriate parameters.
-        
-        Args:
-            url: Target URL
-            callback: Callback function
-            referer: Referrer URL
-            depth: Crawl depth
-            
-        Returns:
-            SeleniumRequest or None
-        """
-        # Verify URL validity
+        """Create a properly configured Selenium request."""
+        if self.crawling_finished:
+            self.logger.warning(f"Crawling terminato: blocco SeleniumRequest per {url}")
+            return None
         if not URLFilters.is_valid_url(url):
             self.logger.warning(f"Invalid URL skipped: {url}")
             return None
-            
-        try:            
-            # Normalize URL
+        
+        try:
             url = URLFilters.normalize_url(url)
             if not url:
                 return None
@@ -676,40 +250,43 @@ class MultiDomainSpider(scrapy.Spider):
                 'depth': depth
             }
             
-            # JavaScript to execute
+            # Prepare headers
+            headers = get_realistic_headers(referer=referer)
+            
+            # Fixed JavaScript without jQuery selectors
             js_script = """
-                // Handle popups and common interface elements
+                // Handle cookie consent and popups
                 try {
-                    // Click cookie accept buttons
-                    var acceptBtns = document.querySelectorAll(
-                        "button:contains('Accept'), button:contains('Accetta'), " +
-                        "button:contains('I agree'), button:contains('Accetto'), " +
-                        "[id*='cookie'] button, [class*='cookie'] button, " +
-                        "[id*='consent'] button, [class*='consent'] button"
-                    );
-                    for (var i = 0; i < acceptBtns.length; i++) {
-                        if (acceptBtns[i].offsetParent !== null) {
-                            acceptBtns[i].click();
-                            console.log('Clicked cookie consent button');
-                            break;
+                    // Find cookie accept buttons by text content
+                    var buttons = document.querySelectorAll('button, a, div[role="button"]');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var text = buttons[i].textContent.toLowerCase();
+                        if (text.includes('accept') || text.includes('accetta') || 
+                            text.includes('agree') || text.includes('ok') ||
+                            text.includes('consent')) {
+                            if (buttons[i].offsetParent !== null) {
+                                buttons[i].click();
+                                console.log('Clicked consent button');
+                                break;
+                            }
                         }
                     }
                     
-                    // Click "load more" buttons
-                    var loadMoreBtns = document.querySelectorAll(
-                        "button:contains('Load more'), button:contains('Show more'), " +
-                        "button:contains('Mostra altro'), button:contains('Carica di più'), " +
-                        "[class*='load-more'], [class*='show-more']"
-                    );
-                    for (var i = 0; i < loadMoreBtns.length; i++) {
-                        if (loadMoreBtns[i].offsetParent !== null) {
-                            loadMoreBtns[i].click();
-                            console.log('Clicked load more button');
-                            break;
+                    // Find and click load more buttons
+                    buttons = document.querySelectorAll('button, a');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var text = buttons[i].textContent.toLowerCase();
+                        if (text.includes('load more') || text.includes('show more') ||
+                            text.includes('carica') || text.includes('mostra')) {
+                            if (buttons[i].offsetParent !== null) {
+                                buttons[i].click();
+                                console.log('Clicked load more button');
+                                break;
+                            }
                         }
                     }
                     
-                    // Scroll page to help load lazy content
+                    // Scroll to trigger lazy loading
                     window.scrollTo(0, document.body.scrollHeight / 2);
                     setTimeout(function() {
                         window.scrollTo(0, document.body.scrollHeight);
@@ -719,203 +296,326 @@ class MultiDomainSpider(scrapy.Spider):
                 }
             """
             
+            # Create SeleniumRequest with all parameters in constructor
             return SeleniumRequest(
                 url=url,
                 callback=callback,
-                wait_time=3,  # Wait for JS rendering
+                wait_time=5,  # Increased wait time for Cloudflare
                 meta=meta,
                 script=js_script,
+                headers=headers,  # Pass headers in constructor
                 dont_filter=False,
                 errback=self.errback_httpbin
             )
+            
         except Exception as e:
             self.logger.error(f"Error creating Selenium request for {url}: {e}")
             return None
-    
-    def _extract_page_item(self, response):
-        """
-        Extract page data into a structured item.
-        
-        Args:
-            response: Scrapy Response object
-            
-        Returns:
-            Item or None: Extracted data
-        """
-        try:
-            # Create item loader
-            loader = PageItemLoader(item=PageItem(), selector=response)
-            
-            # Basic information
-            url = response.url
-            domain = URLFilters.get_domain(url)
-            referer = response.meta.get('referer')
-            
-            # Check domain validity
-            if domain not in self.domains:
-                return None
-                
-            # URL and metadata
-            loader.add_value('url', url)
-            loader.add_value('domain', domain)
-            loader.add_value('referer', referer)
-            loader.add_value('status', response.status)
-            loader.add_value('depth', response.meta.get('depth', 0))
-            loader.add_value('timestamp', datetime.now().isoformat())
-            loader.add_value('crawl_time', time.time())
-            
-            # URL template
-            template = URLFilters.get_url_template(url)
-            loader.add_value('template', template)
-            
-            # Page content
-            loader.add_css('title', 'title::text')
-            loader.add_css('meta_description', 'meta[name="description"]::attr(content)')
-            loader.add_css('meta_keywords', 'meta[name="keywords"]::attr(content)')
-            loader.add_css('h1', 'h1::text')
-            
-            # Links
-            links = self.link_extractor.extract_links(response)
-            loader.add_value('links', list(links))
-            
-            # Save HTML content if configured
-            if self.settings.getbool('PIPELINE_KEEP_HTML', False):
-                loader.add_value('content', response.text)
-            
-            # Update statistics
-            self.crawler.stats.inc_value(f'domain/{domain}/items')
-            
-            return loader.load_item()
-        except Exception as e:
-            self.logger.error(f"Error extracting item from {response.url}: {e}")
-            return None
-        
-    def _update_url_structure(self, response):
-        """
-        Update URL structure and template data.
-        
-        Args:
-            response: Scrapy Response object
-        """
-        url = response.url
+
+    def errback_httpbin(self, failure):
+        """Handle request errors with improved Selenium fallback."""
+        request = failure.request
+        url = request.url
         domain = URLFilters.get_domain(url)
         
-        # Generate template
-        template = URLFilters.get_url_template(url)
+        self.logger.error(f"Error processing: {url}")
+        self.logger.error(f"Error type: {failure.type}")
+        self.logger.error(f"Error value: {failure.value}")
         
-        # Store structure with domain prefix
-        domain_template = f"{domain}:{template}"
+        # Log detailed response if present
+        response = getattr(failure.value, 'response', None)
+        if response is not None:
+            self.logger.error(f"[errback] Status: {response.status}")
+            self.logger.error(f"[errback] Headers: {dict(response.headers)}")
+            body_preview = response.text[:500] if hasattr(response, 'text') else str(response.body[:500])
+            self.logger.error(f"[errback] Body preview: {body_preview}")
         
-        # Look for similar templates
-        similar = self._find_similar_template(domain_template)
-        if similar:
-            # Increment counter for existing template
-            if similar in self.structures:
-                self.structures[similar]['count'] += 1
-            else:
-                self.structures[similar] = {
-                    'template': similar,
-                    'url': url,
-                    'domain': domain,
-                    'count': 1
-                }
+        # Update statistics
+        if domain in self.domains:
+            self.crawler.stats.inc_value(f'domain/{domain}/errors')
+        
+        # Handle specific error types
+        if hasattr(failure.value, 'response'):
+            status = failure.value.response.status
+            
+            # For 429 (Too Many Requests), always try Selenium
+            if status == 429 and self.hybrid_mode:
+                if not request.meta.get('selenium') and self.selenium_error_count < self.selenium_max_errors:
+                    self.logger.info(f"429 error - attempting Selenium fallback for: {url}")
+                    time.sleep(2)  # Brief pause before Selenium attempt
+                    yield self.make_selenium_request(
+                        url, 
+                        self.parse,
+                        depth=request.meta.get('depth', 0)
+                    )
+                else:
+                    self.logger.warning(f"429 error persists even with Selenium for: {url}")
+            
+            # For 403 (Forbidden), try Selenium if not already used
+            elif status == 403 and self.hybrid_mode:
+                if not request.meta.get('selenium'):
+                    self.logger.info(f"403 error - attempting Selenium fallback for: {url}")
+                    yield self.make_selenium_request(
+                        url,
+                        self.parse,
+                        depth=request.meta.get('depth', 0)
+                    )
+
+    def parse(self, response):
+        """Parse response and extract data."""
+        if self.crawling_finished:
+            self.logger.warning(f"Crawling terminato: blocco parse per {response.url}")
+            return
+        current_url = response.url
+        domain = URLFilters.get_domain(current_url)
+        depth = response.meta.get('depth', 0)
+        
+        if domain not in self.domains:
+            self.logger.warning(f"Response from unexpected domain: {domain}")
+            return
+        
+        # Check domain limits
+        if self.domain_counts[domain] >= self.max_urls_per_domain:
+            if domain not in self.domain_limit_reached:
+                self.logger.warning(f"Raggiunto max_urls_per_domain={self.max_urls_per_domain} per {domain}. Crawling bloccato per questo dominio.")
+                self.domain_limit_reached.add(domain)
+            # Se tutti i domini hanno raggiunto il limite, blocca tutto
+            if all(self.domain_counts[d] >= self.max_urls_per_domain for d in self.domains):
+                self.crawling_finished = True
+                self.logger.warning("Tutti i domini hanno raggiunto il limite: crawling globale terminato.")
+            return
+        
+        # Check total limit
+        if self.processed_count >= self.max_total_urls:
+            self.crawling_finished = True
+            self.logger.warning(f"Raggiunto max_total_urls={self.max_total_urls}. Crawling globale terminato.")
+            return
+        
+        # Update counters
+        self.domain_counts[domain] += 1
+        self.processed_count += 1
+        
+        # Update statistics
+        self.crawler.stats.inc_value(f'domain/{domain}/pages')
+        self.crawler.stats.set_value(f'domain/{domain}/prev_count', self.domain_counts[domain])
+        
+        # Log progress
+        was_selenium = response.meta.get('selenium', False)
+        self.logger.info(f"[{self.processed_count}/{self.max_total_urls}] Processing: {current_url} "
+                        f"(depth: {depth}, selenium: {was_selenium})")
+        
+        # Switch to normal requests after threshold in hybrid mode
+        if self.hybrid_mode and was_selenium and self.domain_counts[domain] > self.selenium_threshold:
+            if self.using_selenium:
+                self.using_selenium = False
+                self.logger.info(f"Switching to normal requests for {domain} after {self.selenium_threshold} pages")
+                self.crawler.stats.set_value('hybrid_mode/switch_time', datetime.now().isoformat())
+                self.crawler.stats.set_value('hybrid_mode/switch_url', current_url)
+        
+        # Extract page item
+        loader = PageItemLoader(item=PageItem(), response=response)
+        loader.add_value('url', current_url)
+        loader.add_value('domain', domain)
+        loader.add_value('timestamp', datetime.now().isoformat())
+        loader.add_value('depth', depth)
+        loader.add_value('referer', response.meta.get('referer'))
+        loader.add_value('status_code', response.status)
+
+        # Solo se la risposta è HTML, usa i selettori
+        if isinstance(response, HtmlResponse):
+            loader.add_xpath('title', '//title/text()')
+            loader.add_xpath('meta_description', '//meta[@name="description"]/@content')
+            loader.add_xpath('h1_text', '//h1//text()')
+            loader.add_value('html_content', response.text[:10000])
+            text_content = ' '.join(response.xpath('//body//text()').extract())
+            text_content = ' '.join(text_content.split())[:5000]
+            loader.add_value('text_content', text_content)
         else:
-            # Create new template entry
-            self.structures[domain_template] = {
-                'template': domain_template,
-                'url': url,
-                'domain': domain,
-                'count': 1
-            }
-    
-    def _find_similar_template(self, template, threshold=0.90):
-        """
-        Find similar templates to avoid duplication.
+            loader.add_value('title', '')
+            loader.add_value('meta_description', '')
+            loader.add_value('h1_text', '')
+            loader.add_value('html_content', '')
+            loader.add_value('text_content', '')
         
-        Args:
-            template: Template string to compare
-            threshold: Similarity threshold (0.0-1.0)
-            
-        Returns:
-            str or None: Similar template if found
-        """
-        for existing in self.structures.keys():
-            # Only compare templates from the same domain
-            if template.split(':', 1)[0] == existing.split(':', 1)[0]:
-                ratio = difflib.SequenceMatcher(None, existing, template).ratio()
-                if ratio >= threshold:
-                    return existing
-        return None
-    
-    def _can_fetch(self, url):
-        """
-        Check if a URL can be fetched according to robots.txt.
+        # Detect template
+        template_key = self._get_template_key(response)
+        loader.add_value('template', template_key)
+        self.templates[domain][template_key].append(current_url)
+        self.logger.debug(f"[DEBUG] Aggiunto {current_url} a template {template_key} (dominio {domain}), ora {len(self.templates[domain][template_key])} URL")
         
-        Args:
-            url: URL to check
+        yield loader.load_item()
+        
+        # Extract and follow links
+        if depth < self.depth_limit:
+            yield from self._extract_and_follow_links(response)
+
+    def _extract_and_follow_links(self, response):
+        """Extract and generate requests for links."""
+        if self.crawling_finished:
+            self.logger.warning(f"Crawling terminato: blocco estrazione link da {response.url}")
+            return
+        current_url = response.url
+        domain = URLFilters.get_domain(current_url)
+        depth = response.meta.get('depth', 0)
+        
+        # Extract links
+        link_extractor = AdvancedLinkExtractor(
+            allowed_domains=self.allowed_domains
+        )
+        links = link_extractor.extract_links(response)
+        
+        # Filter and process links
+        requests_generated = 0
+        for link in links:
+            if self.crawling_finished:
+                self.logger.warning("Crawling terminato: blocco generazione richieste in _extract_and_follow_links.")
+                break
+            # Skip if domain limit reached
+            link_domain = URLFilters.get_domain(link)
+            if link_domain in self.domains and self.domain_counts[link_domain] >= self.max_urls_per_domain:
+                self.logger.info(f"Dominio {link_domain} ha raggiunto il limite, skip link {link}")
+                continue
             
-        Returns:
-            bool: True if the URL can be fetched
-        """
-        if not self.respect_robots:
-            return True
+            # Skip if total limit reached
+            if self.processed_count + requests_generated >= self.max_total_urls:
+                self.crawling_finished = True
+                self.logger.warning(f"Raggiunto max_total_urls={self.max_total_urls} durante estrazione link. Crawling globale terminato.")
+                break
             
-        try:
-            from scrapy.robotstxt import RobotFileParser
+            # Skip blocked URLs
+            if not URLFilters.is_valid_url(link):
+                continue
             
-            domain = URLFilters.get_domain(url)
-            
-            # Create parser for this domain if it doesn't exist
-            if domain not in self.robots_parsers:
-                self.robots_parsers[domain] = RobotFileParser()
-                robots_url = f"https://{domain}/robots.txt"
+            # Generate request
+            try:
+                new_depth = depth + 1
+                if self.depth_limit and new_depth > self.depth_limit:
+                    continue
                 
-                # Try to download robots.txt
-                try:
-                    request = Request(robots_url)
-                    response = self.crawler.engine.download(request)
-                    if response.status == 200:
-                        self.robots_parsers[domain].parse(response.body.splitlines())
-                    else:
-                        # If not available, allow all
-                        return True
-                except Exception:
-                    # In case of error, allow all
-                    return True
-            
-            # Check if the URL is allowed
-            return self.robots_parsers[domain].can_fetch("*", url)
-        except Exception as e:
-            self.logger.error(f"Error checking robots.txt for {url}: {e}")
-            return True  # Allow in case of error
-    
-    def closed(self, reason):
-        """
-        Execute cleanup actions when the spider is closed.
+                headers = get_realistic_headers(referer=current_url)
+                
+                # Decide whether to use Selenium
+                use_selenium = False
+                if self.hybrid_mode:
+                    # Use Selenium for first few pages or if still using selenium mode
+                    if self.domain_counts[link_domain] < self.selenium_threshold and self.using_selenium:
+                        use_selenium = True
+                    elif self.domain_counts[link_domain] < 3:  # Always use Selenium for first 3 pages
+                        use_selenium = True
+                
+                if use_selenium:
+                    req = self.make_selenium_request(
+                        link,
+                        self.parse,
+                        referer=current_url,
+                        depth=new_depth
+                    )
+                    if req:
+                        requests_generated += 1
+                        yield req
+                else:
+                    requests_generated += 1
+                    yield Request(
+                        url=link,
+                        headers=headers,
+                        callback=self.parse,
+                        meta={
+                            'referer': current_url,
+                            'dont_redirect': False,
+                            'handle_httpstatus_list': [301, 302, 403, 429],
+                            'depth': new_depth
+                        },
+                        errback=self.errback_httpbin,
+                        dont_filter=True  # Allow retry with different method
+                    )
+                    
+            except Exception as e:
+                self.logger.error(f"Error generating request for {link}: {e}")
         
-        Args:
-            reason: Reason for closing
-        """
+        self.logger.info(f"Generated {requests_generated} new requests from {current_url}")
+
+    def _get_dom_signature(self, response: HtmlResponse) -> str:
+        """Crea una firma univoca basata sulla struttura del DOM."""
+        try:
+            selectors = ['header', 'footer', 'main', 'nav', 'aside']
+            parts = []
+            for selector in selectors:
+                elements = response.css(selector)
+                if elements:
+                    child_count = len(elements[0].xpath('./*'))
+                    parts.append(f"{selector}:{child_count}")
+            parts.append(f"h1:{len(response.css('h1'))}")
+            parts.append(f"h2:{len(response.css('h2'))}")
+            parts.append(f"h3:{len(response.css('h3'))}")
+            signature_str = "|".join(parts)
+            return hashlib.md5(signature_str.encode()).hexdigest()
+        except Exception as e:
+            self.logger.warning(f"Impossibile generare la firma del DOM per {getattr(response, 'url', 'unknown')}: {e}")
+            return 'unknown_dom_signature'
+
+    def _get_template_key(self, response):
+        """Generate a template key for the page using DOM signature."""
+        dom_signature = self._get_dom_signature(response)
+        domain = URLFilters.get_domain(response.url)
+        template_key = f"{domain}:{dom_signature}"
+        # Optionally, store the signature for later analysis
+        self.template_structures[domain][template_key] = {'dom_signature': dom_signature}
+        return template_key
+
+    def closed(self, reason):
+        """Log final statistics when spider closes."""
         self.logger.info(f"Spider closed: {reason}")
         self.logger.info(f"Total URLs processed: {self.processed_count}")
         
-        # Domain statistics
-        for domain, count in sorted(self.domain_counts.items(), key=lambda x: x[1], reverse=True):
+        for domain in self.domains:
+            count = self.domain_counts[domain]
             self.logger.info(f"Domain {domain}: {count} URLs processed")
-        
-        # Clean up the link extractor
-        if hasattr(self, 'link_extractor'):
-            self.link_extractor.close()
             
-        # Log top templates by domain
-        domain_templates = defaultdict(list)
-        for template, data in self.structures.items():
-            domain = data.get('domain', '')
-            domain_templates[domain].append((template, data))
-        
-        for domain, templates in domain_templates.items():
-            sorted_templates = sorted(templates, key=lambda x: x[1]['count'], reverse=True)
+            # Log top templates
+            if domain in self.templates:
+                self.logger.info(f"Top templates for {domain}:")
+                sorted_templates = sorted(
+                    self.templates[domain].items(),
+                    key=lambda x: len(x[1]),
+                    reverse=True
+                )[:5]
+                
+                for i, (template, urls) in enumerate(sorted_templates, 1):
+                    self.logger.info(f"  {i}. {template} - {len(urls)} pages")
             
-            self.logger.info(f"Top templates for {domain}:")
-            for i, (template, data) in enumerate(sorted_templates[:5], 1):
-                self.logger.info(f"  {i}. {template} - {data['count']} pages")
+            # DEBUG: Logga la struttura dei template
+            if domain in self.templates:
+                for template, urls in self.templates[domain].items():
+                    self.logger.info(f"[DEBUG] Template {template} ha {len(urls)} URL prima del salvataggio")
+            else:
+                self.logger.warning(f"[DEBUG] Nessuna entry self.templates per dominio {domain}")
+            
+            # --- PATCH: Salvataggio persistente delle occorrenze template ---
+            try:
+                import pickle
+                import os
+                if self.output_manager and hasattr(self.output_manager, 'domain_slug') and hasattr(self.output_manager, 'get_path'):
+                    output_path = self.output_manager.get_path("crawler", f"crawler_state_{self.output_manager.domain_slug}.pkl")
+                    os.makedirs(output_path.parent, exist_ok=True)
+                else:
+                    # Fallback legacy (solo se output_manager non disponibile)
+                    clean_domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
+                    clean_domain = clean_domain.split('/')[0]
+                    domain_slug = "".join(c if c.isalnum() else "_" for c in clean_domain)
+                    output_dir = os.path.join("output", domain_slug, "crawler_output")
+                    os.makedirs(output_dir, exist_ok=True)
+                    output_path = os.path.join(output_dir, f"crawler_state_{domain_slug}.pkl")
+                structures = {}
+                for template_key, urls in self.templates[domain].items():
+                    normalized_urls = list({self.normalize_url(u) for u in urls if u})
+                    structures[template_key] = {
+                        "urls": normalized_urls,
+                        "url": normalized_urls[0] if normalized_urls else None,
+                        "count": len(normalized_urls)
+                    }
+                state = {"structures": structures}
+                with open(output_path, "wb") as f:
+                    pickle.dump(state, f)
+                self.logger.info(f"Template structures saved to {output_path}")
+            except Exception as e:
+                self.logger.error(f"Failed to save template structures for {domain}: {e}")

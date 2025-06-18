@@ -36,6 +36,18 @@ class MultiDomainPipeline:
         self.output_dir = output_dir if output_manager is None else None
         self.keep_html = keep_html
         self.report_format = report_format
+        
+        # Tenta di ottenere ConfigurationManager
+        self.config_manager = None
+        try:
+            from ....utils.config_manager import get_config_manager
+            self.config_manager = get_config_manager()
+        except ImportError:
+            try:
+                from src.utils.config_manager import get_config_manager
+                self.config_manager = get_config_manager()
+            except ImportError:
+                pass
             
         # Dati per dominio
         self.domain_data = defaultdict(lambda: {
@@ -48,14 +60,20 @@ class MultiDomainPipeline:
             'stats': defaultdict(int)
         })
         
-        # Contatori e intervallo di salvataggio
+        # Contatori e intervallo di salvataggio configurabili
         self.item_count = 0
         self.domain_counts = defaultdict(int)
-        self.save_interval = 50  # Salva ogni 50 item per dominio
-        self.flush_interval = 10  # Intervallo per flush su disco
+        self.save_interval = 50  # Default
+        self.flush_interval = 10  # Default
+        
+        # Applica configurazioni se disponibili
+        if self.config_manager:
+            self.save_interval = self.config_manager.get_int('PIPELINE_SAVE_INTERVAL', 50)
+            self.flush_interval = self.config_manager.get_int('PIPELINE_FLUSH_INTERVAL', 10)
         
         # Registro
         self.logger = logging.getLogger('domain_pipeline')
+        self.logger.info(f"Pipeline inizializzata: save_interval={self.save_interval}, flush_interval={self.flush_interval}")
         
         # URL totali e ultimi URL processati per dominio
         self.total_urls = 0
@@ -77,7 +95,10 @@ class MultiDomainPipeline:
         keep_html = crawler.settings.getbool('PIPELINE_KEEP_HTML', False)
         report_format = crawler.settings.get('PIPELINE_REPORT_FORMAT', 'all')
         
-        return cls(output_dir, keep_html, report_format)
+        # Integrazione con output_manager se disponibile
+        output_manager = getattr(crawler.spider, 'output_manager', None) if hasattr(crawler, 'spider') else None
+        
+        return cls(output_dir, keep_html, report_format, output_manager)
         
     def open_spider(self, spider):
         """
@@ -135,9 +156,14 @@ class MultiDomainPipeline:
         url = item['url']
         
         # Crea directory per dominio se non esiste già
-        domain_dir = os.path.join(self.output_dir, domain)
-        if not os.path.exists(domain_dir):
-            os.makedirs(domain_dir)
+        if self.output_manager:
+            # Usa output_manager per gestione centralizzata
+            self.output_manager.ensure_path_exists("crawler", domain)
+        else:
+            # Fallback alla gestione classica
+            domain_dir = os.path.join(self.output_dir, domain)
+            if not os.path.exists(domain_dir):
+                os.makedirs(domain_dir)
         
         # Aggiorna contatori
         self.item_count += 1
@@ -232,14 +258,15 @@ class MultiDomainPipeline:
         # Aggiorna struttura template
         if 'template' in item:
             template = item['template']
+            url_norm = item['url']
             if template in domain_data['structures']:
                 domain_data['structures'][template]['count'] += 1
                 # Aggiorna solo se l'URL è più corto (normalmente indica una pagina di livello superiore)
-                if len(url) < len(domain_data['structures'][template]['url']):
-                    domain_data['structures'][template]['url'] = url
+                if len(url_norm) < len(domain_data['structures'][template]['url']):
+                    domain_data['structures'][template]['url'] = url_norm
             else:
                 domain_data['structures'][template] = {
-                    'url': url,
+                    'url': url_norm,
                     'count': 1,
                     'template': template,
                     'domain': domain

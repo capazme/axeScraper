@@ -34,16 +34,26 @@ class EnhancedStatsCollector(StatsCollector):
         self._crawling_speed_history = []
         self._crawling_speed_window = []
         
+        # Parametri configurabili con integrazione ConfigurationManager
+        self.config_manager = None
+        if hasattr(crawler, 'spider') and hasattr(crawler.spider, 'config_manager'):
+            self.config_manager = crawler.spider.config_manager
+        
         # Intervallo di tempo per il calcolo della velocità (in secondi)
         self.speed_interval = 30
-        self.last_speed_check = self.start_time
-        self.items_since_last_check = 0
+        if self.config_manager:
+            self.speed_interval = self.config_manager.get_int('STATS_SPEED_INTERVAL', 30)
         
         # Finestra di tempo per calcolare velocità media (ultimi N valori)
         self.speed_window_size = 10
+        if self.config_manager:
+            self.speed_window_size = self.config_manager.get_int('STATS_SPEED_WINDOW_SIZE', 10)
+        
+        self.last_speed_check = self.start_time
+        self.items_since_last_check = 0
         
         self.logger = logging.getLogger('stats_collector')
-        self.logger.info("EnhancedStatsCollector inizializzato")
+        self.logger.info(f"EnhancedStatsCollector inizializzato (speed_interval={self.speed_interval}s, window_size={self.speed_window_size})")
     
     def set_value(self, key, value, spider=None):
         """

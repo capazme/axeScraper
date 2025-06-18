@@ -51,7 +51,8 @@ class FunnelManager:
         # Setup logger
         self.logger = get_logger("funnel_manager", 
                            self.config_manager.get_logging_config()["components"].get("funnel_manager", {}),
-                           output_manager)
+                           output_manager,
+                           domain=self.domain)
         
         # Load funnel configuration
         self.funnel_config = self._load_funnel_config()

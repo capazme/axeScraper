@@ -1,9 +1,9 @@
 {
     "BASE_URLS": [
-      "https://www.nortbeachwear.com/"
+        "https://www.nortbeachwear.com/"
     ],
-    "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
-    "START_STAGE": "crawler",
+    "OUTPUT_DIR": "~/axeScraper/output",
+    "START_STAGE": "axe",
     "REPEAT_ANALYSIS": 1,
     
     "RESOURCE_MONITORING": true,
@@ -31,13 +31,15 @@
     "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
     
     "CRAWLER_MAX_WORKERS": 16,
-    "CRAWLER_MAX_URLS": 500,
+    "CRAWLER_MAX_URLS": 50,
+    "CRAWLER_MAX_TOTAL_URLS": 750,
     "CRAWLER_MAX_RETRIES": 10,
     "CRAWLER_REQUEST_DELAY": 0.5,
+    "CRAWLER_DEPTH_LIMIT": 5,
     "CRAWLER_HYBRID_MODE": true,
     "CRAWLER_PENDING_THRESHOLD": 300,
     
-    "AXE_MAX_TEMPLATES": 1000,
+    "AXE_MAX_TEMPLATES": 50,
     "AXE_POOL_SIZE": 5,
     "AXE_SLEEP_TIME": 1.0,
     "AXE_HEADLESS": true,
@@ -88,5 +90,26 @@
     
     "FUNNELS": {
       
-    }
+    },
+    
+    "PROGRESS_LOG_INTERVAL": 5,
+    "PROGRESS_SHOW_ETA": true,
+    "PROGRESS_SHOW_DOMAINS": true,
+    "PROGRESS_SHOW_SPEED": true,
+    
+    "STATS_SPEED_INTERVAL": 30,
+    "STATS_SPEED_WINDOW_SIZE": 10,
+    
+    "PIPELINE_KEEP_HTML": false,
+    "PIPELINE_REPORT_FORMAT": "all",
+    "PIPELINE_SAVE_INTERVAL": 50,
+    "PIPELINE_FLUSH_INTERVAL": 10,
+    
+    "EMAIL_ENABLED": false,
+    "EMAIL_SMTP_HOST": "",
+    "EMAIL_SMTP_PORT": 587,
+    "EMAIL_SMTP_USER": "",
+    "EMAIL_SMTP_PASSWORD": "",
+    "EMAIL_FROM": "",
+    "EMAIL_TO": []
   }
