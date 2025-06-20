@@ -1,0 +1,282 @@
+{
+  "BASE_URLS": [
+    "https://test.locautorent.com/it/"
+  ],
+  "OUTPUT_DIR": "/home/ec2-user/axeScraper/output",
+  "START_STAGE": "axe",
+  "REPEAT_ANALYSIS": 1,
+  
+  "RESOURCE_MONITORING": true,
+  "RESOURCE_CHECK_INTERVAL": 5,
+  "CPU_THRESHOLD": 85,
+  "MEMORY_THRESHOLD": 80,
+  "COOL_DOWN_TIME": 10,
+  
+  "LOG_LEVEL": "DEBUG",
+  "LOG_FORMAT": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+  "LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
+  "LOG_CONSOLE": true,
+  "LOG_ROTATING": true,
+  "LOG_MAX_BYTES": 10485760,
+  "LOG_BACKUP_COUNT": 5,
+  "CRAWLER_LOG_LEVEL": "DEBUG",
+  "ANALYSIS_LOG_LEVEL": "DEBUG",
+  "REPORT_LOG_LEVEL": "DEBUG",
+  "PIPELINE_LOG_LEVEL": "DEBUG",
+  "AUTH_LOG_LEVEL": "DEBUG",
+  "FUNNEL_LOG_LEVEL": "DEBUG",
+  
+  "EMAIL_RECIPIENT": "g.puzio@sapglegal.com",
+  "EMAIL_SUBJECT": "Accessibility Analysis Report",
+  "EMAIL_BODY": "Please find attached the accessibility analysis reports, including authenticated areas and user flow funnels.",
+  
+  "CRAWLER_MAX_WORKERS": 16,
+  "CRAWLER_MAX_URLS": 500,
+  "CRAWLER_MAX_RETRIES": 10,
+  "CRAWLER_REQUEST_DELAY": 0.5,
+  "CRAWLER_HYBRID_MODE": true,
+  "CRAWLER_PENDING_THRESHOLD": 300,
+  
+  "AXE_MAX_TEMPLATES": 500,
+  "AXE_POOL_SIZE": 5,
+  "AXE_SLEEP_TIME": 1.0,
+  "AXE_HEADLESS": true,
+  "AXE_RESUME": true,
+  
+  "AUTH_ENABLED": true,
+  "AUTH_STRATEGIES": ["form"],  
+  
+  "AUTH_BASIC_USERNAME": "username-http-basic",
+  "AUTH_BASIC_PASSWORD": "password-http-basic",
+  
+  "AUTH_FORM_LOGIN_URL": "https://test.locautorent.com/it/mylocauto/#/auth/login",
+  "AUTH_FORM_USERNAME": "ddwddrv@gmail.com",
+  "AUTH_FORM_PASSWORD": "ddwddrv@gmail.com",
+  "AUTH_FORM_USERNAME_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.textInput > div > div > input[type=text]",
+  "AUTH_FORM_PASSWORD_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > div.inputWrapper.passwordInput > div > div > input[type=password]",
+  "AUTH_FORM_SUBMIT_SELECTOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.colRight > div > div > div > div > form > a",
+  "AUTH_FORM_SUCCESS_INDICATOR": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.asideContent > aside > div > ul > li:nth-child(2) > a",
+  "AUTH_FORM_ERROR_INDICATOR": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a",
+  
+  "AUTH_PRE_LOGIN_ACTIONS": [
+    {"type": "wait", "seconds": 5},
+    {"type": "cookie_banner"},
+    {"type": "wait", "seconds": 5},
+    {"type": "click", "selector": "#app > div > div.v--modal-overlay > div > div.v--modal-box.v--modal > div > a"}
+  ],
+  
+  "AUTH_POST_LOGIN_ACTIONS": [
+    {"type": "wait", "seconds": 5},
+    {"type": "screenshot", "filename": "post_login.png"}
+  ],
+  
+  "AUTH_DOMAINS": {
+    "test_locautorent_com": {
+      "restricted_urls": [
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/profile",
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/account",
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/register-booking",
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/rentals",
+        "https://www.test.locautorent.com/it/mylocauto/#/dashboard/loyalty-locauto"
+      ],
+      "explore_restricted_area": true,
+      "auth_strategy": "form"
+    }
+  },
+
+
+  "FUNNEL_ANALYSIS_ENABLED": true,
+  
+  "FUNNELS": {
+    "smart_checkin": {
+      "description": "Funnel di smart-checkin",
+      "domain": "test_locautorent_com",
+      "auth_required": true,
+      "steps": [
+        {
+          "name": "Landing",
+          "url": "https://test.locautorent.com/it/mylocauto/#/dashboard/new-trips",
+          "wait_for_selector": "#vue3-app-root-0-0",
+          "actions": [
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "landing_page.png"},
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 5}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.NewTrips > div > div.tripCardsList > div > div > div.innerWrapper > div.ctaWrapper > a"
+          }
+        },
+        {
+          "name": "SelectSmartCheckin",
+          "actions": [
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.NewTrips > div > div.tripCardsList > div > div > div.innerWrapper > div.ctaWrapper > a"},
+            {"type": "wait", "seconds": 5}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+          }
+        },
+        {
+          "name": "TermsCheckout",
+          "actions": [
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 2},
+            {"type": "script", "code": "const checkbox = document.getElementById('form-field-termsAndConditions'); const label = document.querySelector('#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > div.subtitle.left > div.checkboxes > div > label'); if (checkbox) { checkbox.checked = true; checkbox.setAttribute('checked', 'checked'); } if (label) { label.setAttribute('aria-checked', 'true'); } const event = new Event('change', {bubbles: true, cancelable: true}); checkbox.dispatchEvent(event); const formInput = checkbox.closest('.FormInputCheckCmp'); if (formInput && formInput.__vue__) { try { formInput.__vue__.$emit('change', true); formInput.__vue__.$emit('input', true); } catch(e) {} }"},
+            {"type": "screenshot", "filename": "terms_click.png"}
+          ],
+          "success_condition": {
+            "type": "element_clickable",
+            "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+          }
+        },
+        {
+          "name": "Clickproceed1",
+          "actions": [
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "search_results.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"
+          }
+        },
+        {
+          "name": "Clickproceed2",
+          "actions": [
+            {"type": "click", "selector": "#app > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div > div.inScreen > div > div > div > div.wrapper > div > a"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "results2.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#continue"
+          }
+        }
+      ]
+    },
+    "car_rent": {
+      "description": "Funnel di prenotazione auto Locauto",
+      "domain": "test_locautorent_com",
+      "auth_required": true,
+      "steps": [
+        {
+          "name": "LandingPage",
+          "url": "test_locautorent_com",
+          "wait_for_selector": "#vue3-app-root-0-0",
+          "actions": [
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "landing_page.png"},
+            {"type": "cookie_banner"},
+            {"type": "wait", "seconds": 5}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "selector": "#vue3-app-root-0-0 > div > div > div > div > form"
+          }
+        },
+        {
+          "name": "SelectLocation",
+          "actions": [
+            {"type": "click", "selector": "#form-field-pickup_search"},
+            {"type": "wait", "seconds": 5},
+            {"type": "input", "selector": "#form-field-pickup_pos_id", "value": "Napoli Aeroporto"},
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "location_insert.png"},
+            {"type": "click", "selector": "#form-field-pickup_pos_id-listbox-item-0 > span"},
+            {"type": "wait", "seconds": 5},
+            {"type": "screenshot", "filename": "location_selected.png"}
+          ],
+          "success_condition": {
+            "type": "element_clickable",
+            "selector": "div.col-auto.pt-xs.d-flex.align-items-start.column-gap-xs > div > button"
+          }
+        },
+        {
+          "name": "ClickSearch",
+          "actions": [
+            {"type": "click", "selector": "div.col-auto.pt-xs.d-flex.align-items-start.column-gap-xs > div > button"},
+            {"type": "wait", "seconds": 10},
+            {"type": "screenshot", "filename": "search_results.png"}
+          ],
+          "success_condition": {
+            "type": "element_visible",
+            "text": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"
+          }
+        },
+
+      {
+        "name": "ChooseCar",
+        "wait_for_selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button",
+        "actions": [
+          {"type": "cookie_banner"},
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div.FunnelList > div > div > div.col-12.pt-md.pb-xxl > div > div > div:nth-child(1) > div:nth-child(1) > div > div > div.footer.bg-color-grey-light > div.ctas > button"},
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "car_details.png"}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"
+        }
+      },
+      {
+        "name": "ChooseCoverage",
+        "actions": [
+          {"type": "cookie_banner"},
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div.ProtectionsCmp.pt-xl > div > div > div:nth-child(1) > div > div > div.pricebox.p-xs.d-flex.flex-column.flex-md-row.row-gap-xs.justify-content-md-between.align-items-md-center.border-color-grey-medium > div.ctawrap.flex-shrink-0 > button"},
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "after_submit_coverage.png"}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "text": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"
+        }
+      },
+      {
+        "name": "ExtraOptions",
+        "actions": [
+          {"type": "cookie_banner"},
+          {"type": "click", "selector": "#vue3-app-root-1-0 > div > div > div:nth-child(3) > div > div.col-12.py-xl.text-center > button"},
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "after_submit_extra.png"}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "text": "#vue3-app-root-1-0 > div > div > div > div.BookingEndCmp.container.pt-md > div > div.col-4 > div > div.CarRecapCardCmp.h-100"
+        }
+      },
+      {
+        "name": "TermsCheckout",
+        "actions": [
+          {"type": "cookie_banner"},
+          {"type": "wait", "seconds": 2},
+          {"type": "script", "code": "const checkbox = document.getElementById('form-field-termsAndConditions'); const label = document.querySelector('label.form-check-label[for=\"form-field-termsAndConditions\"]'); if (checkbox) { checkbox.checked = true; checkbox.setAttribute('checked', 'checked'); } if (label) { label.setAttribute('aria-checked', 'true'); } const event = new Event('change', {bubbles: true, cancelable: true}); checkbox.dispatchEvent(event); const formInput = checkbox.closest('.FormInputCheckCmp'); if (formInput && formInput.__vue__) { try { formInput.__vue__.$emit('change', true); formInput.__vue__.$emit('input', true); } catch(e) {} }"},
+          {"type": "screenshot", "filename": "terms_click.png"}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "selector": "#vue3-app-root-1-0 > div > div > div > div.BookingEndCmp.container.pt-md > div > div.col-4 > div > div.CarRecapCardCmp.h-100"
+        }
+      },
+      {
+        "name": "Checkout",
+        "actions": [
+       
+          {"type": "click", "selector": "#booking-end-complete-anchor-target > form > div > div:nth-child(8) > div > div > button"},
+          {"type": "wait", "seconds": 5},
+          {"type": "screenshot", "filename": "final_checkout.png"},
+          {"type": "wait", "seconds": 5}
+        ],
+        "success_condition": {
+          "type": "element_visible",
+          "text": "body > div.DialogCmp.d-flex.justify-content-center.align-items-center.DialogCarCardCmp.vfm.vfm--fixed.vfm--inset > div.vfm__content.vfm--outline-none > div"
+        }
+      }
+      ]
+    }
+  }
+}

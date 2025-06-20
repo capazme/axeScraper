@@ -67,24 +67,15 @@ class MultiDomainSpider(scrapy.Spider):
         # Initialize output manager for centralized path management
         self.output_manager = None
         try:
-            from ....utils.output_manager import OutputManager
-            from ....utils.config import OUTPUT_ROOT
+            from src.utils.output_manager import OutputManager
+            from src.utils.config import OUTPUT_ROOT
             temp_domains = self._get_domains(kwargs)
             if temp_domains:
                 self.output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=temp_domains[0], create_dirs=True)
                 self.logger.info("Output manager initialized successfully")
-        except ImportError:
-            try:
-                from src.utils.output_manager import OutputManager
-                from src.utils.config import OUTPUT_ROOT
-                temp_domains = self._get_domains(kwargs)
-                if temp_domains:
-                    self.output_manager = OutputManager(base_dir=OUTPUT_ROOT, domain=temp_domains[0], create_dirs=True)
-                    self.logger.info("Output manager initialized successfully")
-            except ImportError:
-                self.logger.warning("OutputManager not available")
         except Exception as e:
-            self.logger.warning(f"Failed to initialize output manager: {e}")
+            self.logger.error(f"Failed to initialize output manager: {e}")
+            self.output_manager = None
         
         # Spider configuration with defaults
         self.domains = self._get_domains(kwargs)
@@ -593,18 +584,8 @@ class MultiDomainSpider(scrapy.Spider):
             # --- PATCH: Salvataggio persistente delle occorrenze template ---
             try:
                 import pickle
-                import os
-                if self.output_manager and hasattr(self.output_manager, 'domain_slug') and hasattr(self.output_manager, 'get_path'):
-                    output_path = self.output_manager.get_path("crawler", f"crawler_state_{self.output_manager.domain_slug}.pkl")
-                    os.makedirs(output_path.parent, exist_ok=True)
-                else:
-                    # Fallback legacy (solo se output_manager non disponibile)
-                    clean_domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
-                    clean_domain = clean_domain.split('/')[0]
-                    domain_slug = "".join(c if c.isalnum() else "_" for c in clean_domain)
-                    output_dir = os.path.join("output", domain_slug, "crawler_output")
-                    os.makedirs(output_dir, exist_ok=True)
-                    output_path = os.path.join(output_dir, f"crawler_state_{domain_slug}.pkl")
+                output_path = self.output_manager.get_path("crawler", f"crawler_state_{self.output_manager.domain_slug}.pkl")
+                os.makedirs(output_path.parent, exist_ok=True)
                 structures = {}
                 for template_key, urls in self.templates[domain].items():
                     normalized_urls = list({self.normalize_url(u) for u in urls if u})

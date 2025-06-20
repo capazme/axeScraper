@@ -2190,8 +2190,6 @@ class AccessibilityAnalyzer:
                                    self.logger.error(f"Error writing cell ({current_row + r_idx}, {c_idx}) for '{title}': {write_err}. Value: {str(value)[:100]}")
                                    ws.write_string(current_row + r_idx, c_idx, "WriteError", cell_format)
 
-                    # Freeze top row (headers)
-                    ws.freeze_panes(current_row, 0)
                     # Add autofilter
                     ws.autofilter(current_row -1 , 0, current_row + len(dataframe) - 1, len(cols_to_write) - 1)
 

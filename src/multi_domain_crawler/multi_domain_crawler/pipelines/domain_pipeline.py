@@ -575,7 +575,7 @@ class MultiDomainPipeline:
                     f.write("| # | Template | Conteggio | URL Esempio |\n")
                     f.write("|---|----------|-----------|-------------|\n")
                     
-                    for i, (template, data) in enumerate(sorted_templates[:10], 1):
+                    for i, (template, data) in enumerate(sorted_templates[:100], 1):
                         f.write(f"| {i} | `{template}` | {data['count']} | [{data['url']}]({data['url']}) |\n")
                     
                     f.write("\n")
@@ -634,7 +634,7 @@ class MultiDomainPipeline:
                     domain_data['structures'].items(),
                     key=lambda x: x[1]['count'],
                     reverse=True
-                )[:10]
+                )[:100]
                 
                 report_data['domains'][domain] = {
                     'pages': pages,
